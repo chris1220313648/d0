@@ -6,6 +6,8 @@ import re
 import sys
 import argparse
 import json
+import glob
+import shutil
 import logging
 import time
 from datetime import datetime
@@ -13,6 +15,14 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import warnings
 
+import debugpy
+# try:
+#     # 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
+#     debugpy.listen(("localhost", 9502))
+#     print("Waiting for debugger attach")
+#     debugpy.wait_for_client()
+# except Exception as e:
+#     pass
 # Set CUDA memory management environment variables to avoid fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -37,6 +47,35 @@ from utils.scheduler import create_scheduler
 from sample import evaluate_model, log_evaluation_metrics
 
 logger = logging.getLogger(__name__)
+
+
+def copy_vlm_aux_files(src_dir: str, dst_dir: str):
+    """Copy tokenizer/processor metadata so exported VLM dir is directly reusable."""
+    if not src_dir or not os.path.isdir(src_dir):
+        return
+
+    aux_patterns = [
+        "config.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "vocab.json",
+        "merges.txt",
+        "added_tokens.json",
+        "preprocessor_config.json",
+        "processor_config.json",
+        "chat_template.json",
+        "*.model",
+    ]
+
+    for pattern in aux_patterns:
+        for src_path in glob.glob(os.path.join(src_dir, pattern)):
+            if not os.path.isfile(src_path):
+                continue
+            dst_path = os.path.join(dst_dir, os.path.basename(src_path))
+            if not os.path.exists(dst_path):
+                shutil.copy2(src_path, dst_path)
 
 def setup_logging(rank: int = 0, log_level: str = "INFO"):
     """Setup logging configuration."""
@@ -118,6 +157,7 @@ class UniDiffuserTrainer:
         tb_writer: Optional[SummaryWriter] = None,
         accelerator: Optional[Any] = None,
         config: Optional[Any] = None,
+        train_lap: bool = False,
     ):
         self.model = model
         self.train_dataloader = train_dataloader
@@ -137,7 +177,7 @@ class UniDiffuserTrainer:
         self.tb_writer = tb_writer
         self.accelerator = accelerator
         self.config = config
-        
+        self.train_lap = train_lap
         # Create checkpoint directory
         if rank == 0:
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -281,13 +321,16 @@ class UniDiffuserTrainer:
         if state is not None:
             state = state.to(self.device, dtype=self.dtype)      # [B, state_dim]
         actions = batch['action_sequence'].to(self.device, dtype=self.dtype)  # [B, action_chunk_size, action_dim]
+        action_mask = batch.get('action_mask', None)
+        if action_mask is not None:
+            action_mask = action_mask.to(self.device)
         # Handle VLM inputs - it's a Dict[str, Tensor] from collate_fn
         vlm_inputs = batch['vlm_inputs']
         if vlm_inputs is not None:
             # Move all tensors in the VLM inputs dict to device
             vlm_inputs = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                          for k, v in vlm_inputs.items()}
-        
+        # print("vlm_inputs keys:",vlm_inputs.keys())
         # Forward pass through UniDiffuser
         # Handle DDP wrapper
         model = self.model.module if hasattr(self.model, 'module') else self.model
@@ -298,10 +341,13 @@ class UniDiffuserTrainer:
             actions=actions,
             language_embeddings=language_embeddings,  # For WAN cross attention
             vlm_inputs=vlm_inputs,  # Complete VLM inputs from dataset
-            return_dict=True
+            action_mask=action_mask,
+            return_dict=True,
+            train_lap=self.train_lap,
         )
         
         total_loss = loss_dict['total_loss']
+        # print("loss_dict :",loss_dict)
         
         # Backward pass (using accelerator if available)
         if hasattr(self, 'accelerator') and self.accelerator is not None:
@@ -389,6 +435,9 @@ class UniDiffuserTrainer:
                     f"(Video: {metrics['video_loss']:.4f}, Action: {metrics['action_loss']:.4f}), "
                     f"LR(main/wan): {lr_main:.2e}/{lr_wan:.2e}, Time: {step_time:.2f}s"
                 )
+                
+                if "llm_loss" in metrics:
+                    log_str += f", LLM Loss: {metrics['llm_loss']:.4f}"
                 logger.info(log_str)
                 
                 # Log to WandB
@@ -405,7 +454,12 @@ class UniDiffuserTrainer:
                 # Log to TensorBoard
                 if self.tb_writer is not None:
                     for key, value in metrics.items():
-                        self.tb_writer.add_scalar(f'train/{key}', value, self.global_step)
+                        if value is None:
+                            continue
+                        try:
+                            self.tb_writer.add_scalar(f'train/{key}', float(value), self.global_step)
+                        except (TypeError, ValueError):
+                            logger.debug(f"Skip non-scalar TensorBoard metric: {key}={type(value)}")
                     self.tb_writer.add_scalar('train/learning_rate_main', lr_main, self.global_step)
                     self.tb_writer.add_scalar('train/learning_rate_wan', lr_wan, self.global_step)
                     self.tb_writer.add_scalar('train/step_time', step_time, self.global_step)
@@ -469,11 +523,13 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         action_loss_weight=config.model.loss_weights.action_loss_weight,
         training_mode=getattr(config, 'training_mode', 'finetune'),
         load_pretrained_backbones=getattr(config.model, 'load_pretrained_backbones', None),
+        # VLM trainability
+        vlm_frozen=config.model.vlm.frozen,
     )
     
     # Create model (Accelerator will handle device placement and DDP)
     model = Motus(model_config)
-    
+
     # Optimizer - parameter groups for separate WAN (video model) learning rate
     base_lr = float(config.training.learning_rate)
     wan_lr = float(getattr(config.training, 'wan_learning_rate', base_lr))
@@ -483,6 +539,8 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
     all_trainable = [p for p in model.parameters() if p.requires_grad]
     wan_param_ids = {id(p) for p in wan_params}
     other_params = [p for p in all_trainable if id(p) not in wan_param_ids]
+    # print(f"other_params: {other_params}")
+
 
     param_groups = []
     if len(other_params) > 0:
@@ -504,7 +562,9 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
 def create_dataloaders(config: OmegaConf, rank: int, world_size: int) -> tuple:
     """Create train and validation dataloaders from config."""
     train_dataset = create_dataset(config, val=False)
+    print(f"len(train_dataset): {len(train_dataset)}")
     val_dataset = create_dataset(config, val=True)
+    print(f"len(val_dataset): {len(val_dataset)}")
 
     # Samplers
     if world_size > 1:
@@ -525,6 +585,16 @@ def create_dataloaders(config: OmegaConf, rank: int, world_size: int) -> tuple:
         collate_fn=collate_fn,
         drop_last=True,
     )
+
+    # Debug: print the first train batch once on rank 0.
+    if rank == 0:
+        try:
+            first_batch = next(iter(train_dataloader))
+            print("First train batch:", first_batch)
+        except StopIteration:
+            logger.warning("Train dataloader is empty; cannot print first batch.")
+        except Exception as e:
+            logger.warning(f"Failed to print first train batch: {e}")
     
     val_dataloader = DataLoader(
         val_dataset,
@@ -658,7 +728,7 @@ def main():
         if getattr(config, 'training_mode', 'finetune') == 'finetune' and finetune_ckpt:
             logger.info(f"Loading finetune weights from {finetune_ckpt} (partial)...")
             try:
-                (model.module if hasattr(model, 'module') else model).load_pretrain_weights(finetune_ckpt)
+                model.load_pretrain_weights(finetune_ckpt)
                 logger.info("Finetune weights loaded (partial).")
             except Exception as e:
                 logger.error(f"Failed to load finetune weights: {e}")
@@ -675,10 +745,61 @@ def main():
                 for i, model_to_save in enumerate(models):
                     # Unwrap the model if it's wrapped by DDP/DeepSpeed
                     unwrapped_model = accelerator.unwrap_model(model_to_save)
-                    
+                    vlm_model = getattr(unwrapped_model, "vlm_model", None)
+
+                    # Optional: export full VLM in HuggingFace save_pretrained format.
+                    try:
+                        export_vlm = bool(getattr(config.model.vlm, "export_pretrained", False))
+                        export_vlm_dir = getattr(config.model.vlm, "export_pretrained_dir", None)
+
+                        if export_vlm:
+                            if vlm_model is not None and hasattr(vlm_model, "save_pretrained"):
+                                if export_vlm_dir:
+                                    vlm_save_dir = export_vlm_dir
+                                else:
+                                    vlm_save_dir = os.path.join(output_dir, f"vlm_pretrained_{i}")
+
+                                os.makedirs(vlm_save_dir, exist_ok=True)
+                                vlm_model.save_pretrained(
+                                    vlm_save_dir,
+                                    safe_serialization=True,
+                                    max_shard_size="5GB",
+                                )
+                                copy_vlm_aux_files(config.model.vlm.checkpoint_path, vlm_save_dir)
+                                logger.info(
+                                    f"Full VLM {i} saved in HuggingFace format to {vlm_save_dir}"
+                                )
+                            else:
+                                logger.warning("VLM export requested but vlm_model is unavailable.")
+                    except Exception as e:
+                        logger.warning(f"Failed to export full VLM model: {e}")
+
+                    # Prefer accelerator-provided full state dict (handles wrapped/distributed cases better).
+                    state_dict = None
+                    if i < len(weights) and isinstance(weights[i], dict):
+                        state_dict = weights[i]
+                    else:
+                        try:
+                            state_dict = accelerator.get_state_dict(model_to_save)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to get accelerator state dict for model {i}, "
+                                f"falling back to unwrapped state_dict: {e}"
+                            )
+                            state_dict = unwrapped_model.state_dict()
+
+                    vlm_key_count = sum(1 for k in state_dict.keys() if k.startswith("vlm_model."))
+                    if vlm_key_count == 0:
+                        logger.warning(
+                            f"Model {i} state_dict contains 0 'vlm_model.*' keys. "
+                            "VLM weights may be missing."
+                        )
+                    else:
+                        logger.info(f"Model {i} state_dict has {vlm_key_count} VLM keys")
+
                     # Save using torch.save instead of accelerator's default method
                     model_save_path = os.path.join(output_dir, f"pytorch_model_{i}.bin")
-                    torch.save(unwrapped_model.state_dict(), model_save_path)
+                    torch.save(state_dict, model_save_path)
                     logger.info(f"Model {i} saved to {model_save_path}")
         
         # Register the custom save hook
@@ -689,7 +810,7 @@ def main():
         model, optimizer, train_dataloader, scheduler = accelerator.prepare(
             model, optimizer, train_dataloader, scheduler
         )
-        
+        train_lap=getattr(config.training, 'train_lap', False)
         # Create trainer
         trainer = UniDiffuserTrainer(
             model=model,
@@ -708,6 +829,7 @@ def main():
             tb_writer=tb_writer,
             accelerator=accelerator,
             config=config,
+            train_lap=train_lap,
         )
         
         # Start training

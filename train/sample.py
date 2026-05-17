@@ -126,24 +126,38 @@ def inference_sample(model, batch: Dict, config) -> Tuple[torch.Tensor, torch.Te
     return predicted_frames, predicted_actions
 
 
-def compute_action_metrics(predicted_actions: torch.Tensor, ground_truth_actions: torch.Tensor) -> Dict[str, float]:
+def compute_action_metrics(
+    predicted_actions: torch.Tensor,
+    ground_truth_actions: torch.Tensor,
+    action_mask: Optional[torch.Tensor] = None,
+) -> Dict[str, float]:
     """
     Compute action prediction metrics (MSE and L2 error).
     
     Args:
         predicted_actions: (B, T, action_dim) predicted actions
         ground_truth_actions: (B, T, action_dim) ground truth actions  
+        action_mask: Optional bool/float mask for valid action dimensions
         
     Returns:
         Dictionary containing MSE and L2 error metrics
     """
     # Compute MSE loss
     mse_loss = F.mse_loss(predicted_actions, ground_truth_actions, reduction='none').float()
-    mse_loss_per_sample = mse_loss.reshape(predicted_actions.shape[0], -1).mean(1)
+    if action_mask is not None:
+        action_mask = action_mask.to(device=predicted_actions.device, dtype=mse_loss.dtype)
+        action_mask = action_mask[:, :predicted_actions.shape[1], :predicted_actions.shape[2]]
+        valid_counts = action_mask.reshape(predicted_actions.shape[0], -1).sum(1).clamp(min=1.0)
+        mse_loss_per_sample = (mse_loss * action_mask).reshape(predicted_actions.shape[0], -1).sum(1) / valid_counts
+    else:
+        mse_loss_per_sample = mse_loss.reshape(predicted_actions.shape[0], -1).mean(1)
     
     # Compute L2 error (RMSE)
     l2_loss = mse_loss.sqrt() / (1 + 1e-3)
-    l2_loss_per_sample = l2_loss.reshape(predicted_actions.shape[0], -1).mean(1)
+    if action_mask is not None:
+        l2_loss_per_sample = (l2_loss * action_mask).reshape(predicted_actions.shape[0], -1).sum(1) / valid_counts
+    else:
+        l2_loss_per_sample = l2_loss.reshape(predicted_actions.shape[0], -1).mean(1)
     
     return {
         'mse_loss': mse_loss_per_sample.mean().item(),
@@ -183,7 +197,10 @@ def evaluate_model(model, dataloader, accelerator, config, num_eval_batches: int
         # Action metrics (local)
         if 'action_sequence' in batch and predicted_actions is not None:
             gt_actions = batch['action_sequence'][:, :predicted_actions.shape[1]].to(predicted_actions.device)
-            action_metrics = compute_action_metrics(predicted_actions, gt_actions)
+            action_mask = batch.get('action_mask', None)
+            if action_mask is not None:
+                action_mask = action_mask[:, :predicted_actions.shape[1]].to(predicted_actions.device)
+            action_metrics = compute_action_metrics(predicted_actions, gt_actions, action_mask=action_mask)
             for key, value in action_metrics.items():
                 metrics[f'action_{key}'].append(value)
         

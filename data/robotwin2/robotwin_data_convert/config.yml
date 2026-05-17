@@ -4,8 +4,8 @@
 # ============================================================================
 # Core Paths - MUST MODIFY THESE
 # ============================================================================
-source_root: "/path/to/robotwin_raw_dataset"     # Source RobotWin dataset root
-target_root: "/path/to/robotwin_dataset"        # Target output directory
+source_root: "/data/user/wsong890/user68/cjy/Motus/data/robotwin_raw_dataset"     # Source RobotWin dataset root
+target_root: "/data/user/wsong890/user68/cjy/Motus/data/robotwin_dataset"        # Target output directory
 
 # ============================================================================
 # Processing Parameters
@@ -56,8 +56,9 @@ demo_type_mapping:
 # Optional Features
 # ============================================================================
 # T5 embeddings (WAN)
-enable_t5_embeddings: false  # Whether to generate T5 embeddings
-wan_repo_path: "path/to/Wan2.2-TI2V-5B"  # WAN model directory (contains T5 models)
+# enable_t5_embeddings: true  # Whether to generate T5 embeddings
+enable_t5_embeddings: true  # Whether to generate T5 embeddings
+wan_repo_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"  # WAN model directory (contains T5 models)
 t5_max_length: 512
 
 # GPU configuration for T5 processing
@@ -68,4 +69,4 @@ cuda_devices: ["0", "1", "2", "3", "4", "5", "6", "7"]  # Available CUDA devices
 # ============================================================================
 log_level: "INFO"          # DEBUG, INFO, WARNING, ERROR
 save_debug_frames: false   # Save sample frames for debugging
-debug_output_dir: "/tmp/robotwin_debug"
+debug_output_dir: "/data/user/wsong890/user68/cjy/Motus/tmp/robotwin_debug"

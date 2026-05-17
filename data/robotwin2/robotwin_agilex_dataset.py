@@ -17,7 +17,7 @@ from PIL import Image
 import tempfile
 
 # VLM processing imports
-from utils.vlm_utils import preprocess_vlm_messages
+from utils.vlm_utils import preprocess_vlm_messages, preprocess_vlm_messages_lap
 from transformers import AutoProcessor
 
 # Import image processing utilities
@@ -70,6 +70,7 @@ class RobotWinTaskDataset(data.Dataset):
         
         # VLM processing parameters
         vlm_checkpoint_path: Optional[str] = None,  # Path to VLM model
+        use_language_action: bool = False,
     ):
         """
         Initialize RobotWin dataset with flexible sampling.
@@ -102,7 +103,7 @@ class RobotWinTaskDataset(data.Dataset):
         self.num_video_frames = num_video_frames
         
         # Calculate action sequence length
-        self.action_chunk_size = num_video_frames * video_action_freq_ratio
+        self.action_chunk_size = num_video_frames * video_action_freq_ratio#8*2=16
         
         # Standard parameters
         self.video_size = video_size
@@ -110,6 +111,7 @@ class RobotWinTaskDataset(data.Dataset):
         self.upsample_rate = upsample_rate
         self.val = val
         self.image_aug = image_aug
+        self.use_language_action = use_language_action
         
         # Validate parameters
         if task_mode == "single" and not task_name:
@@ -137,6 +139,7 @@ class RobotWinTaskDataset(data.Dataset):
         logger.info(f"  Action chunk size: {self.action_chunk_size}")
         logger.info(f"  Video frames to predict: {num_video_frames}")
         logger.info(f"  Total episodes: {self.total_episodes}")
+        logger.info(f"  Use language action: {use_language_action}")
         
         # Initialize VLM processor for complete VLM processing in dataset
         self.vlm_processor = None
@@ -182,10 +185,14 @@ class RobotWinTaskDataset(data.Dataset):
         qpos_dir = task_path / "qpos"
         videos_dir = task_path / "videos"
         umt5_dir = task_path / "umt5_wan"
+        lang_action_dir = task_path / "language_action"
         
         # Check if all required directories exist
         if not all([qpos_dir.exists(), videos_dir.exists(), umt5_dir.exists()]):
             logger.warning(f"Missing data directories in {task_path}")
+            return []
+        if self.use_language_action and not lang_action_dir.exists():
+            logger.warning(f"Missing language action directory in {task_path}")
             return []
         
         # Find valid episodes (those that have all three data types)
@@ -200,16 +207,26 @@ class RobotWinTaskDataset(data.Dataset):
             # Check if corresponding video and language files exist
             video_file = videos_dir / f"{episode_name}.mp4"
             lang_file = umt5_dir / f"{episode_name}.pt"
-            
+            lang_action_file = lang_action_dir / f"{episode_name}.txt"
             if video_file.exists() and lang_file.exists():
                 # Store full paths
-                episode_data = {
-                    'episode_name': episode_name,
-                    'task_name': task_path.name,
-                    'qpos_path': str(qpos_file),
-                    'video_path': str(video_file),
-                    'lang_path': str(lang_file),
-                }
+                if self.use_language_action:
+                    episode_data = {
+                        'episode_name': episode_name,
+                        'task_name': task_path.name,
+                        'qpos_path': str(qpos_file),
+                        'video_path': str(video_file),
+                        'lang_path': str(lang_file),
+                        'lang_action_path': str(lang_action_file),
+                    }
+                else:
+                    episode_data = {
+                        'episode_name': episode_name,
+                        'task_name': task_path.name,
+                        'qpos_path': str(qpos_file),
+                        'video_path': str(video_file),
+                        'lang_path': str(lang_file),
+                    }
                 valid_episodes.append(episode_data)
         
         logger.info(f"Task {task_path.name} ({task_path.parent.name}): Found {len(valid_episodes)} valid episodes")
@@ -222,6 +239,7 @@ class RobotWinTaskDataset(data.Dataset):
         # Determine which data splits to scan
         if self.data_mode == "both":
             data_splits = ["clean", "randomized"]
+            # data_splits = ["aloha-agilex_clean_50", "aloha-agilex_randomized_500"]
         else:
             data_splits = [self.data_mode]
         
@@ -353,7 +371,6 @@ class RobotWinTaskDataset(data.Dataset):
         except Exception as e:
             logger.error(f"Error loading language embedding from {lang_path}: {e}")
             raise
-    
     def _load_text_instruction(self, task_name: str, episode_name: str, instruction_idx: int = None, split: Optional[str] = None) -> str:
         """Load text instruction for VLM processing.
 
@@ -401,6 +418,27 @@ class RobotWinTaskDataset(data.Dataset):
         except Exception as e:
             logger.error(f"Failed to load text instruction for {task_name}/{episode_name}: {e}")
             raise
+    def _load_language_action(self, lang_action_path: str, condition_frame_idx: int) -> str:
+        """Load language action and return the selected index."""
+        try:
+            # Try to read from meta file first
+            # Path structure: dataset_dir/split/task_name/metas/episode_name.txt
+
+
+            # meta_file = lang_action_path+ f"{condition_frame_idx}.txt"
+            with open(lang_action_path, 'r', encoding='utf-8') as f:
+                lines = f.read().strip().split('\n')
+                # Filter out empty lines
+                language_actions = [line.strip() for line in lines if line.strip()]
+                if condition_frame_idx>len(language_actions)-1:
+                    language_action = language_actions[-1]
+                else:
+                    language_action = language_actions[condition_frame_idx]
+            return language_action
+        except Exception as e:
+            logger.error(f"Failed to load language action for {lang_action_path} at frame {condition_frame_idx}: {e}")
+            raise
+ 
     
     def _calculate_sampling_indices(self, total_frames: int) -> Tuple[int, List[int], List[int]]:
         """
@@ -428,7 +466,7 @@ class RobotWinTaskDataset(data.Dataset):
         
         # Action indices: from condition_frame_idx+1 onwards, with downsampling
         action_indices = []
-        for i in range(self.action_chunk_size):
+        for i in range(self.action_chunk_size):#取action_chunk_size个action
             # Each action is separated by global_downsample_rate frames
             action_idx = condition_frame_idx + (i + 1) * self.global_downsample_rate
             action_indices.append(min(action_idx, total_frames - 1))
@@ -436,7 +474,7 @@ class RobotWinTaskDataset(data.Dataset):
         # Video indices: sample at frequency ratio intervals from action indices
         # Example: ratio=5, frames=[5, 10, 15, 20] for 4 video frames
         video_indices = []
-        for i in range(self.num_video_frames):
+        for i in range(self.num_video_frames):#取num_video_frames个video
             action_step = (i + 1) * self.video_action_freq_ratio - 1
             if action_step < len(action_indices):
                 video_indices.append(action_indices[action_step])
@@ -452,7 +490,7 @@ class RobotWinTaskDataset(data.Dataset):
     
     def __len__(self) -> int:
         """Return approximate dataset length."""
-        return self.total_episodes * 10  # Assume 100 samples per episode
+        return self.total_episodes * 100  # Assume 100 samples per episode
     
     def __getitem__(self, idx: int) -> Optional[Dict[str, Any]]:
         """
@@ -475,7 +513,7 @@ class RobotWinTaskDataset(data.Dataset):
             else:
                 if not self.task_to_episodes:
                     continue
-                task_name = random.choices(
+                task_name = random.choices(#随机取出一个动作
                     list(self.task_weights.keys()),
                     weights=list(self.task_weights.values()),
                     k=1
@@ -483,7 +521,7 @@ class RobotWinTaskDataset(data.Dataset):
                 task_episodes = self.task_to_episodes.get(task_name, [])
                 if not task_episodes:
                     continue
-                episode_data = random.choice(task_episodes)
+                episode_data = random.choice(task_episodes)#随机取一个episode
 
             try:
                 # Get video frame count (decord-based; robust to ffmpeg timeouts)
@@ -499,6 +537,11 @@ class RobotWinTaskDataset(data.Dataset):
                 video_frames = load_video_frames(episode_data['video_path'], video_indices, self.video_size)
                 initial_state, action_sequence = self._load_robot_data(episode_data['qpos_path'], action_indices, condition_frame_idx)
                 language_embedding, instruction_idx = self._load_language_embedding(episode_data['lang_path'])
+                # print("self.use_language_action",self.use_language_action)
+                if self.use_language_action:
+                    language_action = self._load_language_action(episode_data['lang_action_path'],condition_frame_idx)
+                else:
+                    language_action = None
 
                 # Infer split from paths
                 inferred_split = None
@@ -526,9 +569,12 @@ class RobotWinTaskDataset(data.Dataset):
                 vlm_inputs = None
                 if self.vlm_processor is not None:
                     first_frame_pil = tensor_to_pil(first_frame.squeeze(0))
-                    vlm_inputs = preprocess_vlm_messages(text_instruction, first_frame_pil, self.vlm_processor)
-
-                return {
+                    if self.use_language_action:
+                        vlm_inputs = preprocess_vlm_messages_lap(text_instruction, first_frame_pil, self.vlm_processor, language_action, supervise_answer=True)
+                    else:
+                        vlm_inputs = preprocess_vlm_messages(text_instruction, first_frame_pil, self.vlm_processor)
+                # print("vlm_inputs.keys()", vlm_inputs.keys())
+                item_data = {
                     'first_frame': first_frame.squeeze(0),
                     'video_frames': video_frames,
                     'initial_state': initial_state,
@@ -536,6 +582,11 @@ class RobotWinTaskDataset(data.Dataset):
                     'language_embedding': language_embedding,
                     'vlm_inputs': vlm_inputs,
                 }
+                # print("item_data['vlm_inputs'].keys()", item_data['vlm_inputs'].keys())
+                # if self.use_language_action:
+                #     item_data['language_action'] = language_action
+                # print("item_data['vlm_inputs'].keys()", item_data['vlm_inputs'].keys())
+                return item_data
 
             except Exception as e:
                 logger.warning(f"Retry due to sample error ({episode_data.get('episode_name','?')}): {e}")

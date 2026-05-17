@@ -23,6 +23,8 @@ echo "  Master addr: $master_addr"
 echo "  Master port: $MASTER_PORT"
 echo "  Config: $CONFIG_FILE"
 echo "  Run name: $RUN_NAME"
+echo "  DeepSpeed config: ${DEEPSPEED_CONFIG:-configs/zero1.json}"
+echo "  Report to: ${REPORT_TO:-tensorboard}"
 
 # Multi-node distributed training with torchrun + DeepSpeed
 torchrun \
@@ -32,9 +34,9 @@ torchrun \
     --master_addr=$master_addr \
     --master_port=$MASTER_PORT \
     train/train.py \
-    --deepspeed configs/zero1.json \
+    --deepspeed ${DEEPSPEED_CONFIG:-configs/zero1.json} \
     --config $CONFIG_FILE \
     $(if [ -n "$RUN_NAME" ]; then echo "--run_name $RUN_NAME"; fi) \
-    --report_to tensorboard
+    --report_to ${REPORT_TO:-tensorboard}
 
 echo "Worker on $(hostname) completed at $(date)"

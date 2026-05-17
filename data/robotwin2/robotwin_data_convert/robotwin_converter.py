@@ -135,11 +135,12 @@ class T5EmbeddingProcessor:
 def process_t5_batch(args):
     """Function for processing T5 embeddings in parallel"""
     processor, meta_files = args
-    
-    # Set CUDA device for this process
-    device_num = processor.device.split(':')[1] if ':' in processor.device else '0'
-    os.environ['CUDA_VISIBLE_DEVICES'] = device_num
-    
+
+    # NOTE:
+    # Do NOT override CUDA_VISIBLE_DEVICES here.
+    # We already pass an explicit device (e.g., "cuda:3") when creating each processor.
+    # Overriding visibility to a single device and then keeping "cuda:3" causes
+    # "invalid device ordinal" due to local remapping.
     results = []
     for meta_path, t5_path in meta_files:
         success = processor.process_meta_file(meta_path, t5_path)

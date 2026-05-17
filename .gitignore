@@ -14,11 +14,28 @@ __pycache__/
 *.safetensors
 data/processed*
 data/raw*
+data/datasets
+data/robotwin_raw_dataset
+data/robotwin_dataset*
+data/bridge/bridge_dataset/
+data/droid/droid_dataset/
+data/fractal/fractal_dataset/
+data/*
 MemFlow/
 output/
 outputs/
 wandb/*
 slurm-*.out
+lap/*
+lap
+checkpoints
+checkpoints/*
+pip
+pip/*
+RoboTwin/*
+RoboTwin/
+pretrained_models
+pretrained_models/*
 
 # C extensions
 *.so
@@ -231,3 +248,9 @@ datasets/*
 scripts_new/
 scripts/run_local.sh
 scripts/manual_multi_node_srun.sh
+
+# Dataset directories
+data/
+datasets/
+**/dataset/
+**/datasets/

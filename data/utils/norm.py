@@ -66,7 +66,11 @@ def denormalize_actions(normalized_actions: torch.Tensor, action_min: np.ndarray
     return torch.from_numpy(denormalized).float()
 
 
-def load_normalization_stats(stats_path: str, dataset_name: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+def load_normalization_stats(
+    stats_path: str,
+    dataset_name: str,
+    signal_name: Optional[str] = None,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Load normalization statistics from file for specified dataset.
     
@@ -83,14 +87,32 @@ def load_normalization_stats(stats_path: str, dataset_name: str) -> Tuple[Option
             stats = json.load(f)
         
         # Get stats for specific dataset
-        if dataset_name in stats:
-            dataset_stats = stats[dataset_name]
-            action_min = np.array(dataset_stats['min'], dtype=np.float32)
-            action_max = np.array(dataset_stats['max'], dtype=np.float32)
-        else:
+        if dataset_name not in stats:
             raise KeyError(f"Dataset '{dataset_name}' not found in normalization stats file")
+
+        dataset_stats = stats[dataset_name]
+        if signal_name is not None:
+            if not isinstance(dataset_stats, dict) or signal_name not in dataset_stats:
+                raise KeyError(
+                    f"Signal '{signal_name}' not found under dataset '{dataset_name}' in normalization stats file"
+                )
+            dataset_stats = dataset_stats[signal_name]
+        else:
+            # Backward compatibility:
+            # - old structure: stats[dataset] has direct min/max
+            # - new nested structure: stats[dataset][signal] has min/max
+            if "min" not in dataset_stats or "max" not in dataset_stats:
+                available = list(dataset_stats.keys()) if isinstance(dataset_stats, dict) else []
+                raise KeyError(
+                    f"Dataset '{dataset_name}' uses nested stats keys {available}. "
+                    "Please provide signal_name (e.g., 'qpos' or 'epos')."
+                )
+
+        action_min = np.array(dataset_stats['min'], dtype=np.float32)
+        action_max = np.array(dataset_stats['max'], dtype=np.float32)
         
-        logger.info(f"Loaded normalization stats for {dataset_name} from {stats_path}")
+        stat_name = f"{dataset_name}/{signal_name}" if signal_name is not None else dataset_name
+        logger.info(f"Loaded normalization stats for {stat_name} from {stats_path}")
         logger.info(f"  Action min: {action_min}")
         logger.info(f"  Action max: {action_max}")
         logger.info(f"  Action range: {action_max - action_min}")
@@ -193,4 +215,3 @@ def normalize_actions_with_quantiles(
 
     normalized = (x - q_low) / q_range
     return torch.from_numpy(normalized).float()
-

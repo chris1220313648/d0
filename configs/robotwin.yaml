@@ -20,7 +20,7 @@ dataset:
   type: "robotwin"  # Dataset type: "robotwin"
   
   # Dataset paths
-  dataset_dir: "/share/dataset/preprocess/robotwin2"
+  dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/robotwin_dataset"
   
   # RobotWin specific parameters
   data_mode: "both"  # "clean", "randomized", or "both"
@@ -39,14 +39,14 @@ dataset:
 model:
   # WAN Video Model settings
   wan:
-    config_path: "/share/home/bhz/pretrained_models/Wan2.2-TI2V-5B"
-    checkpoint_path: "/share/home/bhz/pretrained_models/Wan2.2-TI2V-5B"
-    vae_path: "/share/home/bhz/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
+    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
+    vae_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
   
   # VLM settings
   vlm:
-    checkpoint_path: "/share/home/bhz/pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: true              # Whether to freeze VLM parameters
   
@@ -124,6 +124,7 @@ training:
   # Distributed training
   find_unused_parameters: false
 
+
 # System settings
 system:
   # Paths
@@ -160,4 +161,4 @@ resume:
   
 # Finetune settings 
 finetune:
-  checkpoint_path: null  # (directory containing mp_rank_00_model_states.pt)
+  checkpoint_path: /data/user/wsong890/user68/cjy/Motus/pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)

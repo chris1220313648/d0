@@ -80,6 +80,8 @@ class MotusConfig:
     # None = default behavior (load), False = skip loading (init from config only)
     load_pretrained_backbones: Optional[bool] = None
 
+    vlm_frozen: bool = True
+
     def __post_init__(self):
         """Calculate derived parameters."""
         # Action chunk size is determined by global downsample rate and frequency ratio
@@ -213,6 +215,7 @@ class VideoModule(nn.Module):
         action_block: nn.Module,
         und_tokens: torch.Tensor,
         und_block: nn.Module,
+        und_k_lens: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Trimodal joint self-attention: WAN + Action + Understanding via WAN self-attn (MoT)."""
         wan_layer = self.video_model.wan_model.blocks[layer_idx]
@@ -249,8 +252,15 @@ class VideoModule(nn.Module):
         u_k = und_block.wan_und_norm_k(u_k_h.flatten(-2)).view(B, L_u, n, d)
         u_v = u_v_h.view(B, L_u, n, d)
 
-        # Meta info for WAN attention
-        seq_lens = torch.full((B,), L_v + L_a + L_u, dtype=torch.long, device=self.device)
+        # Meta info for WAN attention.
+        # If und_k_lens is provided, language-action suffix tokens are excluded from K/V visibility.
+        if und_k_lens is None:
+            seq_lens = torch.full((B,), L_v + L_a + L_u, dtype=torch.long, device=self.device)
+        else:
+            und_k_lens = und_k_lens.to(device=self.device, dtype=torch.long).reshape(-1)
+            if und_k_lens.numel() != B:
+                raise ValueError(f"und_k_lens batch mismatch: got {und_k_lens.numel()}, expected {B}")
+            seq_lens = L_v + L_a + und_k_lens
         freqs = self.video_model.wan_model.freqs
         if freqs.device != self.device:
             freqs = freqs.to(self.device)
@@ -319,17 +329,32 @@ class UndModule(nn.Module):
             vlm_kwargs['visual_pos_masks'] = visual_pos_masks
         if deepstack_image_embeds is not None:
             vlm_kwargs['deepstack_visual_embeds'] = deepstack_image_embeds
-
-        with torch.no_grad():
+        llm_loss = None
+        use_no_grad = self.config.vlm_frozen
+        # if isinstance(vlm_inputs, dict):
+        #     logger.info("vlm_inputs keys: %s", list(vlm_inputs.keys()))
+        if use_no_grad:#冻住vlm
+            with torch.no_grad():
+                vlm_output = self.vlm_model.model.language_model(**vlm_kwargs)
+            last_layer_features = vlm_output.hidden_states[-1]  # [B, seq_len, vlm_dim]
+        else:
+            # logger.info("VLM grad enabled")
             vlm_output = self.vlm_model.model.language_model(**vlm_kwargs)
-
-        # Extract last layer features directly
-        last_layer_features = vlm_output.hidden_states[-1]  # [B, seq_len, vlm_dim]
-
+            last_layer_features = vlm_output.hidden_states[-1]  # [B, seq_len, vlm_dim]
+            if 'labels' in vlm_inputs:
+                # hidden_states = last_layer_features
+                logits = self.vlm_model.lm_head(last_layer_features)  
+                # print("logits shape:",logits.shape)
+                # print("vlm_inputs['labels'] shape:",vlm_inputs['labels'].shape)
+                llm_loss = self.vlm_model.loss_function(
+                    logits,
+                    vlm_inputs['labels'],
+                    vocab_size=self.vlm_model.config.text_config.vocab_size,
+                )
         # [B, seq_len, vlm_dim] -> [B, seq_len, und_dim]
-        adapted_features = self.und_expert.vlm_adapter(last_layer_features)
 
-        return adapted_features
+        adapted_features = self.und_expert.vlm_adapter(last_layer_features)
+        return adapted_features, llm_loss
         
     def _process_vlm_inputs_to_tokens(self, vlm_inputs, B: int) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[list], torch.Tensor]:
         """Convert VLM inputs to tokens.
@@ -510,7 +535,7 @@ class Motus(nn.Module):
             )
 
         # Initialize VLM (frozen)
-        logger.info("Initializing VLM (frozen)...")
+        logger.info("Initializing VLM...")
         if load_backbones:
             self.vlm_model = Qwen3VLForConditionalGeneration.from_pretrained(
                 config.vlm_checkpoint_path,
@@ -525,14 +550,16 @@ class Motus(nn.Module):
             # Move to CUDA and dtype explicitly
             self.vlm_model.to(device="cuda", dtype=self.dtype)
             logger.info("Initializing VLM from config...")
+        logger.info(f"VLM kept complete with {len(self.vlm_model.model.language_model.layers)} layers")
 
-        # Freeze VLM parameters
-        for param in self.vlm_model.parameters():
-            param.requires_grad = False
-        logger.info("VLM parameters frozen")
+    
+        self._configure_vlm_trainability()
+
+        # for n, _ in self.vlm_model.named_modules():
+        #     print(n)
 
         # Keep VLM complete (do not truncate)
-        logger.info(f"VLM kept complete with {len(self.vlm_model.model.language_model.layers)} layers")
+        # logger.info(f"VLM kept complete with {len(self.vlm_model.model.language_model.layers)} layers")
 
         # Get WAN and VLM configurations directly
         wan_dim = getattr(self.video_model.wan_model.config, 'dim', 3072)
@@ -671,6 +698,50 @@ class Motus(nn.Module):
         # Log parameter counts
         self.log_parameter_counts()
 
+    def _configure_vlm_trainability(self) -> None:
+        """Configure VLM trainability mode: frozen or full fine-tune."""
+        if self.config.vlm_frozen:
+            for param in self.vlm_model.parameters():
+                param.requires_grad = False
+            logger.info("VLM parameters frozen")
+        else:
+            for param in self.vlm_model.parameters():
+                param.requires_grad = True
+            logger.info("VLM parameters unfrozen")
+
+    def _build_und_k_lens(self, vlm_inputs: Any, und_tokens: torch.Tensor) -> Optional[torch.Tensor]:
+        """Build per-sample K/V visible lengths for Understanding tokens from answer_start."""
+        if not isinstance(vlm_inputs, dict):
+            return None
+
+        answer_start = vlm_inputs.get("answer_start")
+        if answer_start is None:
+            return None
+
+        if torch.is_tensor(answer_start):
+            answer_start = answer_start.to(device=self.device, dtype=torch.long)
+        else:
+            answer_start = torch.as_tensor(answer_start, device=self.device, dtype=torch.long)
+        answer_start = answer_start.reshape(-1)
+
+        batch_size = und_tokens.shape[0]
+        if answer_start.numel() == 1 and batch_size > 1:
+            answer_start = answer_start.expand(batch_size)
+        elif answer_start.numel() != batch_size:
+            logger.warning(
+                "Skip und K/V masking due to answer_start shape mismatch: got %s, expected batch %d",
+                tuple(answer_start.shape), batch_size
+            )
+            return None
+
+        attention_mask = vlm_inputs.get("attention_mask")
+        if torch.is_tensor(attention_mask):
+            valid_lens = attention_mask.to(device=self.device, dtype=torch.long).sum(dim=1).reshape(-1)
+            if valid_lens.numel() == batch_size:
+                answer_start = torch.minimum(answer_start, valid_lens)
+
+        return answer_start.clamp(min=1, max=und_tokens.shape[1])
+
     def log_parameter_counts(self):
         """Log detailed parameter counts for each component."""
         total_params = sum(p.numel() for p in self.parameters())
@@ -679,6 +750,7 @@ class Motus(nn.Module):
         video_params = sum(p.numel() for p in self.video_model.parameters())
         action_params = sum(p.numel() for p in self.action_expert.parameters())
         vlm_params = sum(p.numel() for p in self.vlm_model.parameters())
+        vlm_trainable_params = sum(p.numel() for p in self.vlm_model.parameters() if p.requires_grad)
         und_params = sum(p.numel() for p in self.und_expert.parameters())
 
         logger.info(f"Motus parameter breakdown:")
@@ -686,7 +758,11 @@ class Motus(nn.Module):
         logger.info(f"  Trainable parameters: {trainable_params / 1e9:.2f}B")
         logger.info(f"  Video Model (WAN): {video_params / 1e9:.2f}B")
         logger.info(f"  Action Expert: {action_params / 1e6:.1f}M")
-        logger.info(f"  VLM (frozen): {vlm_params / 1e9:.2f}B")
+        if self.config.vlm_frozen:
+            vlm_mode = "VLM (frozen)"
+        else:
+            vlm_mode = "VLM (unfrozen)"
+        logger.info(f"  {vlm_mode}: {vlm_params / 1e9:.2f}B (trainable {vlm_trainable_params / 1e6:.1f}M)")
         logger.info(f"  Und Expert: {und_params / 1e6:.1f}M")
 
     def load_checkpoint(self, path: str, strict: bool = True) -> Dict:
@@ -767,8 +843,10 @@ class Motus(nn.Module):
         state: torch.Tensor = None,       # [B, state_dim] - robot state
         actions: torch.Tensor = None,     # [B, chunk_size, action_dim] - actions
         language_embeddings: Optional[List[torch.Tensor]] = None,  # Pre-encoded T5 embeddings for WAN
-        vlm_inputs: Optional[List] = None,  # Complete VLM inputs from dataset
-        return_dict: bool = True
+        vlm_inputs: Optional[List] = None,  # Complete VLM inputs from dataset  
+        action_mask: Optional[torch.Tensor] = None,  # [B, chunk_size, action_dim] valid action dims
+        return_dict: bool = True,
+        train_lap: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
         UniDiffuser training step with three modalities.
@@ -781,6 +859,7 @@ class Motus(nn.Module):
             state: Initial robot state
             actions: Target action sequence
             language_embeddings: Pre-encoded T5 embeddings for WAN model
+            action_mask: Optional mask for padded action dimensions
             return_dict: Whether to return detailed outputs
             
         Returns:
@@ -817,14 +896,23 @@ class Motus(nn.Module):
         video_tokens = self.video_module.prepare_input(noisy_video_latent.to(self.dtype))
 
         # 2. Action pipeline 
+        action_mask_float = None
+        if action_mask is not None:
+            action_mask_float = action_mask.to(device=actions.device, dtype=actions.dtype)
+
         timestep_id_action = torch.randint(0, self.fm_train_scheduler_action.num_train_timesteps, (B,))
         # Discrete timesteps for time embedding (0..num_train_timesteps)
         action_t_embed = self.fm_train_scheduler_action.timesteps[timestep_id_action].to(dtype=self.dtype, device=self.device)  # [B]
         # Sigma for action noise mixture
         sigma_action = self.fm_train_scheduler_action.sigmas[timestep_id_action].to(dtype=self.dtype, device=self.device).view(B, 1, 1)
         action_noise = torch.randn_like(actions, dtype=self.dtype)
+        if action_mask_float is not None:
+            action_noise = action_noise * action_mask_float
         noisy_actions = actions * (1 - sigma_action) + action_noise * sigma_action
         action_target = action_noise - actions
+        if action_mask_float is not None:
+            noisy_actions = noisy_actions * action_mask_float
+            action_target = action_target * action_mask_float
 
         # Encode Action Chunk with optional Registers
         if self.action_expert.config.num_registers > 0 and self.action_expert.registers is not None:
@@ -837,7 +925,10 @@ class Motus(nn.Module):
             state_tokens = state.unsqueeze(1).to(self.dtype)
             action_tokens = self.action_expert.input_encoder(state_tokens, noisy_actions, registers)
 
-        und_tokens = self.und_module.extract_und_features(vlm_inputs)  # [B, seq_len, und_dim]
+        und_tokens,llm_loss = self.und_module.extract_und_features(vlm_inputs)  # [B, seq_len, und_dim]
+        und_k_lens = self._build_und_k_lens(vlm_inputs, und_tokens)
+        # print("und_k_lens:",und_k_lens)
+        # logger.info("llm_loss", llm_loss)
 
         # Time embeddings
         # Use scheduler-provided timesteps (0..num_train_timesteps) for WAN/action time embeddings
@@ -846,6 +937,9 @@ class Motus(nn.Module):
 
         # T5 preprocess
         processed_t5_context = self.video_module.preprocess_t5_embeddings(language_embeddings)
+
+        #und_mask
+
 
         # 3. MoT forward
         with torch.autocast(device_type="cuda", dtype=self.video_model.precision):
@@ -859,7 +953,8 @@ class Motus(nn.Module):
                 video_tokens, action_tokens, und_tokens = self.video_module.process_joint_attention(
                     video_tokens, action_tokens, video_adaln_modulation, action_adaln_modulation, layer_idx, 
                     self.action_expert.blocks[layer_idx],
-                    und_tokens, self.und_expert.blocks[layer_idx]
+                    und_tokens, self.und_expert.blocks[layer_idx],
+                    und_k_lens=und_k_lens
                 )
 
                 # WAN cross
@@ -887,18 +982,27 @@ class Motus(nn.Module):
             video_loss = torch.nn.functional.mse_loss(video_pred_masked, video_target, reduction='mean')
         
             # Action loss
-            action_loss = torch.nn.functional.mse_loss(action_pred, action_target, reduction='mean')
+            if action_mask_float is not None:
+                action_loss_mask = action_mask_float[:, :action_pred.shape[1], :].to(action_pred.dtype)
+                action_loss_raw = torch.nn.functional.mse_loss(action_pred, action_target, reduction='none')
+                action_loss = (action_loss_raw * action_loss_mask).sum() / action_loss_mask.sum().clamp(min=1.0)
+            else:
+                action_loss = torch.nn.functional.mse_loss(action_pred, action_target, reduction='mean')
 
         total_loss = (
             self.config.video_loss_weight * video_loss +
             self.config.action_loss_weight * action_loss
         )
+        if llm_loss is not None:
+            total_loss += llm_loss
+            # logger.info("llm_loss is not None")
         
         if return_dict:
             return {
                 'total_loss': total_loss,
                 'video_loss': video_loss,
                 'action_loss': action_loss,
+                'llm_loss': llm_loss,
                 'video_timestep_mean': sigma.float().mean().item(),
                 'action_timestep_mean': sigma_action.float().mean().item(),
             }
@@ -948,6 +1052,9 @@ class Motus(nn.Module):
         # 2. Understanding Expert features and T5 context
         # Extract understanding features from VLM
         und_tokens = self.und_module.extract_und_features(vlm_inputs)
+        if isinstance(und_tokens, tuple):
+            und_tokens = und_tokens[0]
+
 
         # T5 preprocess
         processed_t5_context = self.video_module.preprocess_t5_embeddings(language_embeddings)
@@ -971,6 +1078,9 @@ class Motus(nn.Module):
 
             # Note: Understanding tokens already extracted before the loop, will be updated in joint attention
             und_tokens = self.und_module.extract_und_features(vlm_inputs)  # [B, num_queries * num_layers, und_dim]
+            if isinstance(und_tokens, tuple):
+                und_tokens = und_tokens[0]
+            und_k_lens = self._build_und_k_lens(vlm_inputs, und_tokens)
 
             
             # Trimodal MoT forward - joint denoising for WAN, Action, Understanding
@@ -989,7 +1099,8 @@ class Motus(nn.Module):
                     video_tokens, action_tokens, und_tokens = self.video_module.process_joint_attention(
                         video_tokens, action_tokens, video_adaln_modulation, action_adaln_modulation, layer_idx, 
                         self.action_expert.blocks[layer_idx],
-                        und_tokens, self.und_expert.blocks[layer_idx]
+                        und_tokens, self.und_expert.blocks[layer_idx],
+                        und_k_lens=und_k_lens
                     )
 
                     # WAN cross-attention with T5 embeddings 

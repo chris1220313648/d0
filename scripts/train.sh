@@ -1,7 +1,8 @@
 #!/bin/bash
 # Define your env settings here 
 # e.g., nccl, network, proxy, etc.
-
+source /share/anaconda3/etc/profile.d/conda.sh
+conda activate /data/user/wsong890/envs/motus
 TASK="robotwin"  # Define your task name here
 CONFIG_FILE="configs/robotwin.yaml"  # Define your dataset config path here
 
@@ -25,4 +26,5 @@ torchrun \
     --deepspeed configs/zero1.json \
     --config $CONFIG_FILE \
     --run_name $TASK \
-    --report_to tensorboard
+    --report_to tensorboard \
+    > $OUTPUT_DIR/train.log 2>&1
