@@ -1,0 +1,66 @@
+# qpos；aboslute joint positions
+# epos；relative end effector positions  默认动作是绝对关节
+#len 48033
+
+# DROID RLDS -> Motus-style converter config
+
+# Source DROID RLDS root. The script auto-resolves source_root/1.0.0.
+source_root: "/data/user/wsong890/user68/data/oxe/data/droid"
+
+# Output root.
+output_root: "/data/user/wsong890/user68/cjy/Motus/data/droid/droid_dataset"
+
+# WAN T5 repo path. Must contain:
+#   models_t5_umt5-xxl-enc-bf16.pth
+#   google/umt5-xxl
+wan_repo_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
+t5_max_length: 512
+t5_device: "auto"
+
+# Conversion controls
+fps: 10
+max_episodes_per_split: 0   # 0 = all episodes in split
+skip_existing: true
+overwrite: false
+
+# DROID camera keys for T-shape concatenation:
+# top = camera_keys[0], bottom-left = camera_keys[1], bottom-right = camera_keys[2]
+camera_keys:
+  - "exterior_image_1_left"
+  - "exterior_image_2_left"
+  - "wrist_image_left"
+
+# Output directory names
+epos_dir_name: "epos"
+language_action_dir_name: "language_action"
+
+# Language action sliding window
+window_size: 16
+generate_t5: true
+generate_language_action: true
+
+# Task naming / grouping
+task_grouping: "exact_instruction"
+task_slug_max_len: 80
+unknown_task_name: "unknown_task"
+
+# Split export policy
+splits: ["train"]
+
+# TensorFlow only reads TFDS data here; keep it off GPU by default
+# so PyTorch can use GPU memory for WAN T5 encoder.
+tf_disable_gpu: true
+
+# Skip noisy/non-task instructions
+skip_invalid_instruction: true
+invalid_instruction_patterns:
+  - "video frame is not showing"
+  - "frame is not showing"
+  - "camera is not showing"
+  - "image is not showing"
+  - "nan"
+  - "none"
+  - "null"
+
+# Logging frequency
+log_every_n: 200

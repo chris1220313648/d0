@@ -1,0 +1,50 @@
+# Bridge RLDS -> Motus-style converter config
+
+# qpos；aboslute joint positions
+# epos；relative end effector positions
+#len 28934
+
+# Source Bridge RLDS root.
+# The script auto-resolves builder directory (supports source_root/0.1.0 layout).
+source_root: "/data/user/wsong890/user68/data/oxe/data/BridgeData_V2/OpenDataLab___BridgeData_V2/raw/bridge"
+
+# Output root (this run keeps top-level split names as train/test).
+output_root: "/data/user/wsong890/user68/cjy/Motus/data/bridge/bridge_dataset"
+
+# WAN T5 repo path. Must contain:
+#   models_t5_umt5-xxl-enc-bf16.pth
+#   google/umt5-xxl
+wan_repo_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
+t5_max_length: 512
+
+# Conversion controls
+fps: 10
+max_episodes_per_split: 0   # 0 = all episodes
+num_workers: 1              # Reserved for future parallelization
+skip_existing: true
+
+# Task naming
+task_slug_max_len: 80
+unknown_task_name: "unknown_task"
+# Task grouping mode:
+#   normalized_instruction: remove colors/spatial/function words for coarser grouping
+#   exact_instruction: use full raw instruction text
+task_grouping: "normalized_instruction"
+
+# Splits to export; output folder keeps these names.
+splits: ["train", "test"]
+
+# TensorFlow only reads TFDS data here; keep it off GPU by default
+# to avoid stealing memory from PyTorch WAN T5 encoder.
+tf_disable_gpu: true
+
+# Skip noisy/non-task instructions
+skip_invalid_instruction: true
+invalid_instruction_patterns:
+  - "video frame is not showing"
+  - "frame is not showing"
+  - "camera is not showing"
+  - "image is not showing"
+
+# Logging frequency
+log_every_n: 50

@@ -250,7 +250,7 @@ scripts/run_local.sh
 scripts/manual_multi_node_srun.sh
 
 # Dataset directories
-data/
+# data/
 datasets/
 **/dataset/
 **/datasets/
