@@ -20,7 +20,7 @@ data/robotwin_dataset*
 data/bridge/bridge_dataset/
 data/droid/droid_dataset/
 data/fractal/fractal_dataset/
-data/*
+# data/*
 MemFlow/
 output/
 outputs/
