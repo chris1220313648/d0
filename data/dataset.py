@@ -67,6 +67,13 @@ class MultiDataset(Dataset):
             action_mask[..., :actions.shape[-1]] = True
             sample['action_mask'] = action_mask
 
+        if sample.get('history_action_sequence') is not None:
+            sample['history_action_sequence'] = _pad_last_dim(
+                sample['history_action_sequence'],
+                self.target_action_dim,
+                'history_action_sequence',
+            )
+
         if sample.get('initial_state') is not None:
             sample['initial_state'] = _pad_last_dim(sample['initial_state'], self.target_state_dim, 'initial_state')
 
@@ -186,6 +193,18 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         # Set validation flag
         if hasattr(config.dataset, 'use_language_action'):
             params['use_language_action'] = config.dataset.use_language_action
+        if hasattr(config.dataset, 'enable_ik_language_action_sampling'):
+            params['enable_ik_language_action_sampling'] = config.dataset.enable_ik_language_action_sampling
+        if hasattr(config.dataset, 'ik_language_action_sampling_rate'):
+            params['ik_language_action_sampling_rate'] = config.dataset.ik_language_action_sampling_rate
+        flow_source = config.model.get('flow_source', {})
+        params['include_history_actions'] = flow_source.get('mode', 'gaussian') == 'history'
+        params['history_action_length'] = int(
+            flow_source.get(
+                'history_length',
+                config.common.num_video_frames * config.common.video_action_freq_ratio,
+            )
+        )
         params['val'] = val
         
         return RobotWinTaskDataset(**params)
@@ -671,6 +690,15 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
     first_frames = torch.stack([sample['first_frame'] for sample in batch])
     video_frames = torch.stack([sample['video_frames'] for sample in batch])
     action_sequences = torch.stack([sample['action_sequence'] for sample in batch])
+    has_history_actions = all(
+        ('history_action_sequence' in sample and sample['history_action_sequence'] is not None)
+        for sample in batch
+    )
+    history_action_sequences = (
+        torch.stack([sample['history_action_sequence'] for sample in batch])
+        if has_history_actions
+        else None
+    )
     has_action_mask = all(('action_mask' in sample and sample['action_mask'] is not None) for sample in batch)
     action_masks = torch.stack([sample['action_mask'] for sample in batch]) if has_action_mask else None
     has_initial_state = all(('initial_state' in sample and sample['initial_state'] is not None) for sample in batch)
@@ -703,6 +731,8 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
 
     if action_masks is not None:
         result['action_mask'] = action_masks
+    if history_action_sequences is not None:
+        result['history_action_sequence'] = history_action_sequences
     if initial_states is not None:
         result['initial_state'] = initial_states
     if any(name is not None for name in dataset_names):

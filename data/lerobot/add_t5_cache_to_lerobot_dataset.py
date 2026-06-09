@@ -63,7 +63,11 @@ def _write_jsonlines_atomic(path: Path, rows: List[Dict[str, Any]]) -> None:
 
 
 def _resolve_dataset_root(repo_id: str, root: Optional[str]) -> Path:
-    # Use LeRobot metadata to resolve default cache dir if root is not provided.
+    # Prefer explicit local root to avoid requiring `lerobot` for pure local processing.
+    if root:
+        return Path(root).expanduser().resolve()
+
+    # Fallback: use LeRobot metadata to resolve default cache dir.
     from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 
     meta = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
@@ -79,14 +83,31 @@ def _init_wan_t5_encoder(
     Initialize WAN T5EncoderModel.
     We mirror the initialization used in Motus inference scripts.
     """
+    patched_cuda_current_device = False
+    original_cuda_current_device = None
+    # `wan.modules.t5` defines a default arg with torch.cuda.current_device()
+    # at import time. On CPU-only hosts, that call raises before we can pass
+    # an explicit `device` to T5EncoderModel. Patch it briefly for import.
+    if not torch.cuda.is_available():
+        try:
+            original_cuda_current_device = torch.cuda.current_device
+            torch.cuda.current_device = lambda: 0  # type: ignore[assignment]
+            patched_cuda_current_device = True
+        except Exception:
+            patched_cuda_current_device = False
+
     try:
-        from Motus.bak.wan.modules.t5 import T5EncoderModel  # type: ignore
-    except Exception:
-        # Fallback: add bak path similarly to inference scripts
-        bak_root = str((Path(__file__).resolve().parents[2] / "bak").resolve())
-        if bak_root not in sys.path:
-            sys.path.insert(0, bak_root)
-        from wan.modules.t5 import T5EncoderModel  # type: ignore
+        try:
+            from Motus.bak.wan.modules.t5 import T5EncoderModel  # type: ignore
+        except Exception:
+            # Fallback: add bak path similarly to inference scripts
+            bak_root = str((Path(__file__).resolve().parents[2] / "bak").resolve())
+            if bak_root not in sys.path:
+                sys.path.insert(0, bak_root)
+            from wan.modules.t5 import T5EncoderModel  # type: ignore
+    finally:
+        if patched_cuda_current_device and original_cuda_current_device is not None:
+            torch.cuda.current_device = original_cuda_current_device  # type: ignore[assignment]
 
     ckpt = os.path.join(wan_path, "Wan2.2-TI2V-5B", "models_t5_umt5-xxl-enc-bf16.pth")
     tok = os.path.join(wan_path, "Wan2.2-TI2V-5B", "google/umt5-xxl")
@@ -245,5 +266,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

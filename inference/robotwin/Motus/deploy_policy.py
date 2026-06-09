@@ -73,6 +73,7 @@ class MotusPolicy:
         self.current_state_norm = None
         self.is_first_step = True
         self.prev_action = None
+        self.previous_action_chunk = None
 
         # Load normalization stats
         self._load_normalization_stats()
@@ -126,6 +127,9 @@ class MotusPolicy:
 
         hidden_size = model_cfg['action_expert']['hidden_size']
         ffn_multiplier = model_cfg['action_expert']['ffn_dim_multiplier']
+        flow_source_cfg = self._resolve_flow_source_config(
+            model_cfg.get('flow_source', {})
+        )
 
         config = MotusConfig(
             # Paths for config loading only (no weights loaded)
@@ -157,6 +161,10 @@ class MotusPolicy:
             num_video_frames=common['num_video_frames'],
             video_loss_weight=1.0,
             action_loss_weight=1.0,
+            flow_source_mode=flow_source_cfg.get('mode', 'gaussian'),
+            flow_source_action_noise_std=float(
+                flow_source_cfg.get('action_noise_std', 0.0)
+            ),
             
             # Inference config
             batch_size=1,
@@ -169,6 +177,38 @@ class MotusPolicy:
         )
 
         return config
+
+    def _resolve_flow_source_config(self, fallback: Dict[str, Any]) -> Dict[str, Any]:
+        """Prefer flow-source metadata saved with the checkpoint."""
+        checkpoint_path = Path(self.checkpoint_path)
+        candidates = []
+        if checkpoint_path.is_dir():
+            candidates.append(checkpoint_path / "config.json")
+        candidates.append(checkpoint_path.parent / "config.json")
+
+        for config_path in candidates:
+            if not config_path.is_file():
+                continue
+            try:
+                import json
+
+                with open(config_path, "r", encoding="utf-8") as f:
+                    checkpoint_config = json.load(f)
+                flow_source = checkpoint_config.get("flow_source")
+                if flow_source is not None:
+                    logger.info(
+                        "Using flow source config from checkpoint: %s",
+                        flow_source,
+                    )
+                    return flow_source
+            except Exception as e:
+                logger.warning(
+                    "Failed to read flow source config from %s: %s",
+                    config_path,
+                    e,
+                )
+
+        return dict(fallback)
     
     def update_obs(self, observation: Dict[str, Any]):
         """Update observation cache with new observation."""
@@ -250,10 +290,20 @@ class MotusPolicy:
 
         # Run inference
         num_inference_steps = self.config_dict['model']['inference']['num_inference_timesteps']
+        action_source = None
+        if self.model.config.flow_source_mode == 'history':
+            if self.previous_action_chunk is None:
+                action_source = self.current_state.unsqueeze(1).expand(
+                    -1, self.model.config.action_chunk_size, -1
+                )
+            else:
+                action_source = self.previous_action_chunk
+
         with torch.no_grad():
             predicted_frames, predicted_actions = self.model.inference_step(
                 first_frame=current_frame,
                 state=self.current_state,
+                action_source=action_source,
                 num_inference_steps=num_inference_steps,
                 language_embeddings=t5_list,
                 vlm_inputs=[vlm_inputs],
@@ -274,6 +324,8 @@ class MotusPolicy:
                 self.step_count += 1
 
         actions_real = predicted_actions.squeeze(0).cpu().numpy()
+        if self.model.config.flow_source_mode == 'history':
+            self.previous_action_chunk = predicted_actions.detach().clone()
         self.prev_action = actions_real[-1].copy()
         self.action_cache.extend(actions_real)
 
@@ -444,6 +496,7 @@ def reset_model(model):
     model.current_state = None
     model.is_first_step = True
     model.prev_action = None
+    model.previous_action_chunk = None
     model.episode_count += 1
     model.step_count = 0
     logger.info(f"Model reset completed for episode {model.episode_count}")

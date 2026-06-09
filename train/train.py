@@ -103,6 +103,22 @@ def load_config(config_path: str) -> OmegaConf:
     
     # Calculate derived parameters
     config.common.action_chunk_size = config.common.num_video_frames * config.common.video_action_freq_ratio
+
+    flow_source = config.model.get('flow_source', {})
+    flow_source_mode = flow_source.get('mode', 'gaussian')
+    if flow_source_mode not in {'gaussian', 'history'}:
+        raise ValueError(
+            f"model.flow_source.mode must be 'gaussian' or 'history', got {flow_source_mode}"
+        )
+    if flow_source_mode == 'history':
+        history_length = int(
+            flow_source.get('history_length', config.common.action_chunk_size)
+        )
+        if history_length != config.common.action_chunk_size:
+            raise ValueError(
+                "model.flow_source.history_length must match action_chunk_size "
+                f"({config.common.action_chunk_size}), got {history_length}"
+            )
     
     # Validate dataset configuration
     dataset_config = {
@@ -209,6 +225,7 @@ class UniDiffuserTrainer:
                 "action_expert": model.get("action_expert", {}),
                 "und_expert": model.get("und_expert", {}),
                 "time_distribution": model.get("time_distribution", {}),
+                "flow_source": model.get("flow_source", {"mode": "gaussian"}),
                 "ema": model.get("ema", {}),
             }
             import json as _json
@@ -321,6 +338,9 @@ class UniDiffuserTrainer:
         if state is not None:
             state = state.to(self.device, dtype=self.dtype)      # [B, state_dim]
         actions = batch['action_sequence'].to(self.device, dtype=self.dtype)  # [B, action_chunk_size, action_dim]
+        history_actions = batch.get('history_action_sequence', None)
+        if history_actions is not None:
+            history_actions = history_actions.to(self.device, dtype=self.dtype)
         action_mask = batch.get('action_mask', None)
         if action_mask is not None:
             action_mask = action_mask.to(self.device)
@@ -339,6 +359,7 @@ class UniDiffuserTrainer:
             video_frames=video_frames,
             state=state,
             actions=actions,
+            history_actions=history_actions,
             language_embeddings=language_embeddings,  # For WAN cross attention
             vlm_inputs=vlm_inputs,  # Complete VLM inputs from dataset
             action_mask=action_mask,
@@ -521,6 +542,10 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         batch_size=config.training.batch_size,
         video_loss_weight=config.model.loss_weights.video_loss_weight,
         action_loss_weight=config.model.loss_weights.action_loss_weight,
+        flow_source_mode=config.model.get('flow_source', {}).get('mode', 'gaussian'),
+        flow_source_action_noise_std=float(
+            config.model.get('flow_source', {}).get('action_noise_std', 0.0)
+        ),
         training_mode=getattr(config, 'training_mode', 'finetune'),
         load_pretrained_backbones=getattr(config.model, 'load_pretrained_backbones', None),
         # VLM trainability
@@ -566,6 +591,20 @@ def create_dataloaders(config: OmegaConf, rank: int, world_size: int) -> tuple:
     val_dataset = create_dataset(config, val=True)
     print(f"len(val_dataset): {len(val_dataset)}")
 
+    def _get_vlm_tokenizer(dataset):
+        """Best-effort lookup for tokenizer from single or multi dataset wrappers."""
+        processor = getattr(dataset, "vlm_processor", None)
+        if processor is not None and hasattr(processor, "tokenizer"):
+            return processor.tokenizer
+
+        child_datasets = getattr(dataset, "datasets", None)
+        if child_datasets is not None:
+            for child in child_datasets:
+                processor = getattr(child, "vlm_processor", None)
+                if processor is not None and hasattr(processor, "tokenizer"):
+                    return processor.tokenizer
+        return None
+
     # Samplers
     if world_size > 1:
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
@@ -590,6 +629,27 @@ def create_dataloaders(config: OmegaConf, rank: int, world_size: int) -> tuple:
     if rank == 0:
         try:
             first_batch = next(iter(train_dataloader))
+            vlm_inputs = first_batch.get("vlm_inputs")
+            if vlm_inputs is not None and "input_ids" in vlm_inputs:
+                input_ids = vlm_inputs["input_ids"][0].detach().cpu()
+                print("input_ids", input_ids)
+
+                tokenizer = _get_vlm_tokenizer(train_dataset)
+                if tokenizer is not None:
+                    valid_input_ids = input_ids
+                    if "attention_mask" in vlm_inputs:
+                        attention_mask = vlm_inputs["attention_mask"][0].detach().cpu().bool()
+                        valid_input_ids = input_ids[attention_mask]
+
+                    print(
+                        "input_ids_str",
+                        tokenizer.decode(valid_input_ids.tolist(), skip_special_tokens=False)
+                    )
+                else:
+                    logger.warning("No VLM tokenizer found; cannot decode input_ids to string.")
+            else:
+                logger.warning("first_batch has no vlm_inputs/input_ids to print.")
+
             print("First train batch:", first_batch)
         except StopIteration:
             logger.warning("Train dataloader is empty; cannot print first batch.")

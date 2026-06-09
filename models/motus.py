@@ -76,6 +76,10 @@ class MotusConfig:
     video_loss_weight: float = 1.0
     action_loss_weight: float = 1.0
 
+    # Flow source. "gaussian" preserves the original behavior.
+    flow_source_mode: str = "gaussian"
+    flow_source_action_noise_std: float = 0.0
+
     # Control whether to load pretrained WAN/VLM backbones.
     # None = default behavior (load), False = skip loading (init from config only)
     load_pretrained_backbones: Optional[bool] = None
@@ -84,6 +88,13 @@ class MotusConfig:
 
     def __post_init__(self):
         """Calculate derived parameters."""
+        if self.flow_source_mode not in {"gaussian", "history"}:
+            raise ValueError(
+                f"flow_source_mode must be 'gaussian' or 'history', got {self.flow_source_mode}"
+            )
+        if self.flow_source_action_noise_std < 0:
+            raise ValueError("flow_source_action_noise_std must be non-negative")
+
         # Action chunk size is determined by global downsample rate and frequency ratio
         self.action_chunk_size = self.num_video_frames * self.video_action_freq_ratio
         
@@ -847,6 +858,7 @@ class Motus(nn.Module):
         action_mask: Optional[torch.Tensor] = None,  # [B, chunk_size, action_dim] valid action dims
         return_dict: bool = True,
         train_lap: bool = False,
+        history_actions: torch.Tensor = None,  # [B, chunk_size, action_dim] - historical qpos
     ) -> Dict[str, torch.Tensor]:
         """
         UniDiffuser training step with three modalities.
@@ -884,12 +896,17 @@ class Motus(nn.Module):
         video_t_embed = self.fm_train_scheduler.timesteps[timestep_id].to(dtype=self.dtype, device=self.device)  # [B]
         # Sigma for noise mixture
         sigma = self.fm_train_scheduler.sigmas[timestep_id].to(dtype=self.dtype, device=self.device).view(B, 1, 1, 1, 1)
-        video_noise = torch.randn_like(clean_full_latent, dtype=self.dtype)
-        noisy_video_latent = clean_full_latent * (1 - sigma) + video_noise * sigma
+        if self.config.flow_source_mode == "history":
+            video_source = condition_frame_latent.expand(
+                -1, -1, clean_full_latent.shape[2], -1, -1
+            )
+        else:
+            video_source = torch.randn_like(clean_full_latent, dtype=self.dtype)
+        noisy_video_latent = clean_full_latent * (1 - sigma) + video_source * sigma
         # Teacher Forcing on the first frame
         noisy_video_latent[:, :, 0:1] = condition_frame_latent
-        # Flow-Matching target: noise - clean
-        video_target = video_noise - clean_full_latent
+        # Flow-Matching target: source - clean
+        video_target = video_source - clean_full_latent
         video_target[:, :, 0:1] = 0
 
         # Latent to Tokens
@@ -905,11 +922,25 @@ class Motus(nn.Module):
         action_t_embed = self.fm_train_scheduler_action.timesteps[timestep_id_action].to(dtype=self.dtype, device=self.device)  # [B]
         # Sigma for action noise mixture
         sigma_action = self.fm_train_scheduler_action.sigmas[timestep_id_action].to(dtype=self.dtype, device=self.device).view(B, 1, 1)
-        action_noise = torch.randn_like(actions, dtype=self.dtype)
+        if self.config.flow_source_mode == "history":
+            if history_actions is None:
+                raise ValueError("history_actions is required when flow_source_mode='history'")
+            if history_actions.shape != actions.shape:
+                raise ValueError(
+                    f"history_actions shape {history_actions.shape} must match actions {actions.shape}"
+                )
+            action_source = history_actions.to(device=actions.device, dtype=actions.dtype)
+            if self.config.flow_source_action_noise_std > 0:
+                action_source = action_source + (
+                    torch.randn_like(action_source)
+                    * self.config.flow_source_action_noise_std
+                )
+        else:
+            action_source = torch.randn_like(actions, dtype=self.dtype)
         if action_mask_float is not None:
-            action_noise = action_noise * action_mask_float
-        noisy_actions = actions * (1 - sigma_action) + action_noise * sigma_action
-        action_target = action_noise - actions
+            action_source = action_source * action_mask_float
+        noisy_actions = actions * (1 - sigma_action) + action_source * sigma_action
+        action_target = action_source - actions
         if action_mask_float is not None:
             noisy_actions = noisy_actions * action_mask_float
             action_target = action_target * action_mask_float
@@ -1013,7 +1044,8 @@ class Motus(nn.Module):
         state: torch.Tensor = None,
         num_inference_steps: int = 50,
         language_embeddings: Optional[List[torch.Tensor]] = None,
-        vlm_inputs: Optional[List] = None
+        vlm_inputs: Optional[List] = None,
+        action_source: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Joint inference for video and action prediction.
@@ -1044,10 +1076,33 @@ class Motus(nn.Module):
         # Init video/action latents
         B, C_latent, f_latent, H_latent, W_latent = condition_frame_latent.shape
         num_total_latent_frames = 1 + self.config.num_video_frames // 4
-        video_latent = torch.randn((B, C_latent, num_total_latent_frames, H_latent, W_latent), device=self.device, dtype=self.dtype)
+        if self.config.flow_source_mode == "history":
+            video_latent = condition_frame_latent.expand(
+                -1, -1, num_total_latent_frames, -1, -1
+            ).clone()
+        else:
+            video_latent = torch.randn(
+                (B, C_latent, num_total_latent_frames, H_latent, W_latent),
+                device=self.device,
+                dtype=self.dtype,
+            )
         video_latent[:, :, 0:1] = condition_frame_latent
         action_shape = (B, self.config.action_chunk_size, self.config.action_dim)
-        action_latent = torch.randn(action_shape, device=self.device, dtype=self.dtype)
+        if self.config.flow_source_mode == "history":
+            if action_source is None:
+                action_source = state.unsqueeze(1).expand(-1, self.config.action_chunk_size, -1)
+            if tuple(action_source.shape) != action_shape:
+                raise ValueError(
+                    f"action_source shape {tuple(action_source.shape)} must be {action_shape}"
+                )
+            action_latent = action_source.to(device=self.device, dtype=self.dtype).clone()
+            if self.config.flow_source_action_noise_std > 0:
+                action_latent = action_latent + (
+                    torch.randn_like(action_latent)
+                    * self.config.flow_source_action_noise_std
+                )
+        else:
+            action_latent = torch.randn(action_shape, device=self.device, dtype=self.dtype)
 
         # 2. Understanding Expert features and T5 context
         # Extract understanding features from VLM

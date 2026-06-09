@@ -20,6 +20,7 @@ data/robotwin_dataset*
 data/bridge/bridge_dataset/
 data/droid/droid_dataset/
 data/fractal/fractal_dataset/
+data/lerobot/AgiBotWorld2026_extracted
 # data/*
 MemFlow/
 output/
@@ -36,6 +37,7 @@ RoboTwin/*
 RoboTwin/
 pretrained_models
 pretrained_models/*
+A2A_Flow_Matching
 
 # C extensions
 *.so

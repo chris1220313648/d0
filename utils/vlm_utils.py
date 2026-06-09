@@ -4,6 +4,7 @@
 from qwen_vl_utils import process_vision_info
 from typing import List, Dict, Any, Tuple
 import logging
+import random
 import torch
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,9 @@ def preprocess_vlm_messages_lap(
     processor,
     language_action: str | None = None,
     supervise_answer: bool = False,
+    enable_ik_language_action_sampling: bool = False,
+    ik_language_action_sampling_rate: float = 0.2,
+    final_frame_pil=None,
 ):
     # 1) 问题文本（你可以自定义）
 
@@ -121,13 +125,24 @@ def preprocess_vlm_messages_lap(
         )
 
     # 训练模式：问题 + 答案（assistant）
-    question = f"任务：{text_instruction}\n请给出下一步动作语言描述。"
+    use_ik_question = (
+        enable_ik_language_action_sampling
+        and ik_language_action_sampling_rate > 0.0
+        and random.random() < ik_language_action_sampling_rate
+    )
+    if use_ik_question:
+        question = "predict the robot's action between two images in the prediction"
+    else:
+        question = f"任务：{text_instruction}\n请给出下一步动作语言描述。"
+    user_content = [{"type": "image", "image": image_pil}]
+    if use_ik_question and final_frame_pil is not None:
+        # print("use_ik_question")
+        # IK-style sample: provide both current frame and action-horizon final frame.
+        user_content.append({"type": "image", "image": final_frame_pil})
+    user_content.append({"type": "text", "text": question})
     user_msg = {
         "role": "user",
-        "content": [
-            {"type": "image", "image": image_pil},
-            {"type": "text", "text": question},
-        ],
+        "content": user_content,
         }
     assistant_msg = {
         "role": "assistant",

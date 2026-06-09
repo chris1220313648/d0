@@ -71,6 +71,10 @@ class RobotWinTaskDataset(data.Dataset):
         # VLM processing parameters
         vlm_checkpoint_path: Optional[str] = None,  # Path to VLM model
         use_language_action: bool = False,
+        enable_ik_language_action_sampling: bool = False,
+        ik_language_action_sampling_rate: float = 0.2,
+        include_history_actions: bool = False,
+        history_action_length: Optional[int] = None,
     ):
         """
         Initialize RobotWin dataset with flexible sampling.
@@ -104,6 +108,16 @@ class RobotWinTaskDataset(data.Dataset):
         
         # Calculate action sequence length
         self.action_chunk_size = num_video_frames * video_action_freq_ratio#8*2=16
+        self.history_action_length = (
+            self.action_chunk_size
+            if history_action_length is None
+            else int(history_action_length)
+        )
+        if self.history_action_length != self.action_chunk_size:
+            raise ValueError(
+                "history_action_length must match action_chunk_size "
+                f"({self.action_chunk_size}), got {self.history_action_length}"
+            )
         
         # Standard parameters
         self.video_size = video_size
@@ -112,6 +126,9 @@ class RobotWinTaskDataset(data.Dataset):
         self.val = val
         self.image_aug = image_aug
         self.use_language_action = use_language_action
+        self.enable_ik_language_action_sampling = enable_ik_language_action_sampling
+        self.ik_language_action_sampling_rate = float(ik_language_action_sampling_rate)
+        self.include_history_actions = bool(include_history_actions)
         
         # Validate parameters
         if task_mode == "single" and not task_name:
@@ -140,6 +157,10 @@ class RobotWinTaskDataset(data.Dataset):
         logger.info(f"  Video frames to predict: {num_video_frames}")
         logger.info(f"  Total episodes: {self.total_episodes}")
         logger.info(f"  Use language action: {use_language_action}")
+        logger.info(f"  Enable IK language-action sampling: {enable_ik_language_action_sampling}")
+        logger.info(f"  IK language-action sampling rate: {self.ik_language_action_sampling_rate}")
+        logger.info(f"  Include history actions: {self.include_history_actions}")
+        logger.info(f"  History action length: {self.history_action_length}")
         
         # Initialize VLM processor for complete VLM processing in dataset
         self.vlm_processor = None
@@ -316,7 +337,13 @@ class RobotWinTaskDataset(data.Dataset):
         # Return all episodes for consistency with other datasets
         return all_episodes
 
-    def _load_robot_data(self, qpos_path: str, action_indices: List[int], initial_state_idx: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _load_robot_data(
+        self,
+        qpos_path: str,
+        action_indices: List[int],
+        initial_state_idx: int = 0,
+        history_action_indices: Optional[List[int]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Load robot position data.
         
@@ -328,6 +355,7 @@ class RobotWinTaskDataset(data.Dataset):
         Returns:
             - initial_state: Robot state at condition frame [state_dim]
             - action_sequence: Actions at specified indices [len(action_indices), action_dim]
+            - history_action_sequence: Historical qpos values, or None
         """
         qpos_data = torch.load(qpos_path, map_location='cpu')  # [T, feature_dim]
         
@@ -346,12 +374,20 @@ class RobotWinTaskDataset(data.Dataset):
             actions.append(action)
         
         action_sequence = torch.stack(actions).float()
+
+        history_action_sequence = None
+        if history_action_indices is not None:
+            history_actions = [
+                qpos_data[min(max(idx, 0), len(qpos_data) - 1)]
+                for idx in history_action_indices
+            ]
+            history_action_sequence = torch.stack(history_actions).float()
         
         # Normalize actions and initial state
         # action_sequence = self._normalize_actions(action_sequence)
         # initial_state = self._normalize_actions(initial_state.unsqueeze(0)).squeeze(0)  # Normalize state same way as actions
         
-        return initial_state, action_sequence
+        return initial_state, action_sequence, history_action_sequence
     
     def _load_language_embedding(self, lang_path: str) -> tuple[torch.Tensor, int]:
         """Load pre-encoded language embedding and return the selected index."""
@@ -487,6 +523,17 @@ class RobotWinTaskDataset(data.Dataset):
             # print(f"  Action interval verification: {set(intervals)} (should all be {self.global_downsample_rate})")
         
         return condition_frame_idx, video_indices, action_indices
+
+    def _calculate_history_action_indices(self, condition_frame_idx: int) -> List[int]:
+        """Return an action-sized qpos history ending at the condition frame."""
+        return [
+            max(
+                0,
+                condition_frame_idx
+                - (self.history_action_length - 1 - i) * self.global_downsample_rate,
+            )
+            for i in range(self.history_action_length)
+        ]
     
     def __len__(self) -> int:
         """Return approximate dataset length."""
@@ -531,11 +578,19 @@ class RobotWinTaskDataset(data.Dataset):
 
                 # Calculate sampling indices
                 condition_frame_idx, video_indices, action_indices = self._calculate_sampling_indices(total_frames)
+                history_action_indices = None
+                if self.include_history_actions:
+                    history_action_indices = self._calculate_history_action_indices(condition_frame_idx)
 
                 # Load frames and aligned robot/action data
                 first_frame = load_video_frames(episode_data['video_path'], [condition_frame_idx], self.video_size)
                 video_frames = load_video_frames(episode_data['video_path'], video_indices, self.video_size)
-                initial_state, action_sequence = self._load_robot_data(episode_data['qpos_path'], action_indices, condition_frame_idx)
+                initial_state, action_sequence, history_action_sequence = self._load_robot_data(
+                    episode_data['qpos_path'],
+                    action_indices,
+                    condition_frame_idx,
+                    history_action_indices,
+                )
                 language_embedding, instruction_idx = self._load_language_embedding(episode_data['lang_path'])
                 # print("self.use_language_action",self.use_language_action)
                 if self.use_language_action:
@@ -569,11 +624,23 @@ class RobotWinTaskDataset(data.Dataset):
                 vlm_inputs = None
                 if self.vlm_processor is not None:
                     first_frame_pil = tensor_to_pil(first_frame.squeeze(0))
+                    final_frame_pil = tensor_to_pil(video_frames[-1].squeeze(0))
                     if self.use_language_action:
-                        vlm_inputs = preprocess_vlm_messages_lap(text_instruction, first_frame_pil, self.vlm_processor, language_action, supervise_answer=True)
+                        vlm_inputs = preprocess_vlm_messages_lap(
+                            text_instruction,
+                            first_frame_pil,
+                            self.vlm_processor,
+                            language_action,
+                            supervise_answer=True,
+                            enable_ik_language_action_sampling=(
+                                self.enable_ik_language_action_sampling and (not self.val)
+                            ),
+                            ik_language_action_sampling_rate=self.ik_language_action_sampling_rate,
+                            final_frame_pil=final_frame_pil,
+                        )
                     else:
                         vlm_inputs = preprocess_vlm_messages(text_instruction, first_frame_pil, self.vlm_processor)
-                # print("vlm_inputs.keys()", vlm_inputs.keys())
+                # print("vlm_inputs", vlm_inputs["input_ids"])
                 item_data = {
                     'first_frame': first_frame.squeeze(0),
                     'video_frames': video_frames,
@@ -582,6 +649,8 @@ class RobotWinTaskDataset(data.Dataset):
                     'language_embedding': language_embedding,
                     'vlm_inputs': vlm_inputs,
                 }
+                if history_action_sequence is not None:
+                    item_data['history_action_sequence'] = history_action_sequence
                 # print("item_data['vlm_inputs'].keys()", item_data['vlm_inputs'].keys())
                 # if self.use_language_action:
                 #     item_data['language_action'] = language_action

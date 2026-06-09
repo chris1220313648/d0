@@ -76,12 +76,23 @@ class MotusConfig:
     video_loss_weight: float = 1.0
     action_loss_weight: float = 1.0
 
+    # Flow source. "gaussian" preserves the original behavior.
+    flow_source_mode: str = "gaussian"
+    flow_source_action_noise_std: float = 0.0
+
     # Control whether to load pretrained WAN/VLM backbones.
     # None = default behavior (load), False = skip loading (init from config only)
     load_pretrained_backbones: Optional[bool] = None
 
     def __post_init__(self):
         """Calculate derived parameters."""
+        if self.flow_source_mode not in {"gaussian", "history"}:
+            raise ValueError(
+                f"flow_source_mode must be 'gaussian' or 'history', got {self.flow_source_mode}"
+            )
+        if self.flow_source_action_noise_std < 0:
+            raise ValueError("flow_source_action_noise_std must be non-negative")
+
         # Action chunk size is determined by global downsample rate and frequency ratio
         self.action_chunk_size = self.num_video_frames * self.video_action_freq_ratio
         
@@ -883,7 +894,8 @@ class Motus(nn.Module):
         state: torch.Tensor = None,
         num_inference_steps: int = 50,
         language_embeddings: Optional[List[torch.Tensor]] = None,
-        vlm_inputs: Optional[List] = None
+        vlm_inputs: Optional[List] = None,
+        action_source: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Joint inference for video and action prediction.
@@ -914,10 +926,33 @@ class Motus(nn.Module):
         # Init video/action latents
         B, C_latent, f_latent, H_latent, W_latent = condition_frame_latent.shape
         num_total_latent_frames = 1 + self.config.num_video_frames // 4
-        video_latent = torch.randn((B, C_latent, num_total_latent_frames, H_latent, W_latent), device=self.device, dtype=self.dtype)
+        if self.config.flow_source_mode == "history":
+            video_latent = condition_frame_latent.expand(
+                -1, -1, num_total_latent_frames, -1, -1
+            ).clone()
+        else:
+            video_latent = torch.randn(
+                (B, C_latent, num_total_latent_frames, H_latent, W_latent),
+                device=self.device,
+                dtype=self.dtype,
+            )
         video_latent[:, :, 0:1] = condition_frame_latent
         action_shape = (B, self.config.action_chunk_size, self.config.action_dim)
-        action_latent = torch.randn(action_shape, device=self.device, dtype=self.dtype)
+        if self.config.flow_source_mode == "history":
+            if action_source is None:
+                action_source = state.unsqueeze(1).expand(-1, self.config.action_chunk_size, -1)
+            if tuple(action_source.shape) != action_shape:
+                raise ValueError(
+                    f"action_source shape {tuple(action_source.shape)} must be {action_shape}"
+                )
+            action_latent = action_source.to(device=self.device, dtype=self.dtype).clone()
+            if self.config.flow_source_action_noise_std > 0:
+                action_latent = action_latent + (
+                    torch.randn_like(action_latent)
+                    * self.config.flow_source_action_noise_std
+                )
+        else:
+            action_latent = torch.randn(action_shape, device=self.device, dtype=self.dtype)
 
         # 2. Understanding Expert features and T5 context
         # Extract understanding features from VLM

@@ -35,7 +35,7 @@ dataset:
   # Data augmentation
   image_aug: false    # Whether to apply image augmentation
   use_language_action: true    # Whether to use language action
-  enable_ik_language_action_sampling: false  # Enable IK-style LAP prompt sampling in training
+  enable_ik_language_action_sampling: true  # Enable IK-style LAP prompt sampling in training
   ik_language_action_sampling_rate: 0.2      # Replace LAP question with IK-style prompt at this ratio
 
 # Model configuration
@@ -104,7 +104,7 @@ model:
 # Training configuration
 training:
   # Optimization settings
-  batch_size: 6
+  batch_size: 5
   # batch_size: 8
   # max_steps: 1000000
   max_steps: 200000
@@ -161,8 +161,11 @@ logging:
   
 
 # Resume training settings
+# resume:
+#   checkpoint_path: null # Path to checkpoint to resume from
 resume:
-  checkpoint_path: null # Path to checkpoint to resume from
+  checkpoint_path: /data/user/wsong890/user68/cjy/Motus/checkpoints/robotwin_lap_idm/robotwin_lap_idm_after_pretrain/checkpoint_step_150000
+  reset_scheduler: false
   # reset_scheduler: false
 # Finetune settings 
 finetune:

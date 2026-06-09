@@ -102,6 +102,11 @@ def inference_sample(model, batch: Dict, config) -> Tuple[torch.Tensor, torch.Te
     video_frames = batch['video_frames'].to(device)  # [B, num_video_frames, C, H, W] - target frames
     
     state = batch['initial_state'].to(device) if 'initial_state' in batch and batch['initial_state'] is not None else None
+    action_source = (
+        batch['history_action_sequence'].to(device)
+        if batch.get('history_action_sequence') is not None
+        else None
+    )
     
     language_embeddings = batch['language_embedding']
     if language_embeddings is not None:
@@ -120,6 +125,7 @@ def inference_sample(model, batch: Dict, config) -> Tuple[torch.Tensor, torch.Te
             num_inference_steps=num_inference_steps,
             language_embeddings=language_embeddings,
             vlm_inputs=vlm_inputs,
+            action_source=action_source,
         )
     
     model.train()

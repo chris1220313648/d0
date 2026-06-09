@@ -21,6 +21,7 @@ def main():
         "action_expert": model.get("action_expert", {}),
         "und_expert": model.get("und_expert", {}),
         "time_distribution": model.get("time_distribution", {}),
+        "flow_source": model.get("flow_source", {"mode": "gaussian"}),
         "ema": model.get("ema", {}),
     }
 
@@ -33,4 +34,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
