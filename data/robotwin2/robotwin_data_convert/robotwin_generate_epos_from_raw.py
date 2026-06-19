@@ -218,9 +218,6 @@ def _process_one_episode(
         quat_order=quat_order,
         include_gripper=include_gripper,
     )
-    print(epos.shape)
-    print(epos)
-
     if align_with_qpos:
         qpos_len = _load_qpos_len(qpos_path)
         epos_len = int(epos.shape[0])

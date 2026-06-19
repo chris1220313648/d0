@@ -80,8 +80,8 @@ def copy_vlm_aux_files(src_dir: str, dst_dir: str):
 def setup_logging(rank: int = 0, log_level: str = "INFO"):
     """Setup logging configuration."""
     # Temporarily set to DEBUG for NaN debugging
-    if log_level == "INFO":
-        log_level = "DEBUG"
+    # if log_level == "INFO":
+    #     log_level = "DEBUG"
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format=f'[Rank {rank}] %(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -174,6 +174,7 @@ class UniDiffuserTrainer:
         accelerator: Optional[Any] = None,
         config: Optional[Any] = None,
         train_lap: bool = False,
+        save_final_checkpoint: bool = True,
     ):
         self.model = model
         self.train_dataloader = train_dataloader
@@ -194,6 +195,7 @@ class UniDiffuserTrainer:
         self.accelerator = accelerator
         self.config = config
         self.train_lap = train_lap
+        self.save_final_checkpoint = save_final_checkpoint
         # Create checkpoint directory
         if rank == 0:
             self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -457,7 +459,7 @@ class UniDiffuserTrainer:
                     f"LR(main/wan): {lr_main:.2e}/{lr_wan:.2e}, Time: {step_time:.2f}s"
                 )
                 
-                if "llm_loss" in metrics:
+                if metrics.get("llm_loss") is not None:
                     log_str += f", LLM Loss: {metrics['llm_loss']:.4f}"
                 logger.info(log_str)
                 
@@ -510,7 +512,10 @@ class UniDiffuserTrainer:
         total_time = time.time() - start_time
         if self.rank == 0:
             logger.info(f"UniDiffuser training completed in {total_time:.2f}s ({self.global_step} steps)")
-            self.save_checkpoint()
+            if self.save_final_checkpoint:
+                self.save_checkpoint()
+            else:
+                logger.info("Skipping final checkpoint save")
 
 def create_model_and_optimizer(config: OmegaConf) -> tuple:
     """Create UniDiffuser model and optimizer from config."""
@@ -723,6 +728,15 @@ def main():
     
     # Create the dataset directory if it doesn't exist
     os.makedirs(config.system.checkpoint_dir, exist_ok=True)
+
+    # Handle report_to settings before Accelerator initialization.
+    report_to = config.logging.get('report_to', 'tensorboard')
+    if report_to == "all":
+        report_to = ["wandb", "tensorboard"]
+    elif report_to == "none":
+        report_to = []
+    elif isinstance(report_to, str):
+        report_to = [report_to]
     
     # Initialize Accelerator with DeepSpeed (if provided)
     accelerator_project_config = ProjectConfiguration(total_limit=20)
@@ -732,7 +746,7 @@ def main():
         ) if args.deepspeed is not None else None,
         gradient_accumulation_steps=config.training.get('gradient_accumulation_steps', 1),
         mixed_precision="bf16",
-        log_with=config.logging.get('report_to', 'tensorboard'),
+        log_with=report_to,
         project_dir=config.system.checkpoint_dir,
         project_config=accelerator_project_config,
     )
@@ -740,15 +754,6 @@ def main():
     rank = accelerator.process_index
     world_size = accelerator.num_processes
     setup_logging(rank, args.log_level)
-    
-    # Handle report_to settings - expand "all" to individual backends
-    report_to = config.logging.report_to
-    if report_to == "all":
-        report_to = ["wandb", "tensorboard"]
-    elif report_to == "none":
-        report_to = []
-    elif isinstance(report_to, str):
-        report_to = [report_to]
     
     # Create run name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -890,6 +895,7 @@ def main():
             accelerator=accelerator,
             config=config,
             train_lap=train_lap,
+            save_final_checkpoint=getattr(config.system, 'save_final_checkpoint', True),
         )
         
         # Start training

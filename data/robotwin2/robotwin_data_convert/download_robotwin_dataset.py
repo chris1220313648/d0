@@ -272,7 +272,7 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="/share/dataset/robotwin/dataset/",
+        default="/root/nas/code/d0/data/robot_data/robotwin/dataset/",
         help="Directory to save the dataset"
     )
     parser.add_argument(

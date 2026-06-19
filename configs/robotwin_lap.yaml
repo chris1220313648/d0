@@ -42,14 +42,14 @@ dataset:
 model:
   # WAN Video Model settings
   wan:
-    config_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    vae_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    checkpoint_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    vae_path: "./pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
   
   # VLM settings
   vlm:
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: false              # Whether to freeze VLM parameters
   
@@ -166,5 +166,5 @@ resume:
   # reset_scheduler: false
 # Finetune settings 
 finetune:
-  # checkpoint_path: /data/user/wsong890/user68/cjy/Motus/pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)
+  # checkpoint_path: ./pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)
   checkpoint_path: /data/user/wsong890/user68/cjy/Motus/checkpoints/multidataset_lap/multidataset_multidataset_lap_multi_node/checkpoint_step_400000/pytorch_model

@@ -22,6 +22,8 @@ dataset:
   max_episodes: null
   image_aug: false
   use_language_action: true
+  enable_setup_control_suffix: false
+  setup_text: "Google RT-1 mobile manipulator robot with gripper"
   normalize_actions: true
   stats_key: "fractal"
   state_stats_signal: "qpos"
@@ -30,13 +32,13 @@ dataset:
 # Model configuration
 model:
   wan:
-    config_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    vae_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    checkpoint_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    vae_path: "./pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
 
   vlm:
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: false
 
@@ -114,4 +116,4 @@ resume:
 
 # Finetune settings
 finetune:
-  checkpoint_path: /data/user/wsong890/user68/cjy/Motus/pretrained_models/Motus
+  checkpoint_path: ./pretrained_models/Motus

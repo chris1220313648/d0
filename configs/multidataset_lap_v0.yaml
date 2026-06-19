@@ -1,6 +1,6 @@
 common:
-  # Use the largest robot dimension; 7-D datasets are padded and masked.
-  action_dim: 14
+  # AgiBot returns 24-D actions; EgoVerse zero actions are padded/masked.
+  action_dim: 24
   state_dim: 14
 
   # Shared video settings
@@ -8,40 +8,64 @@ common:
   video_height: 384
   video_width: 320
 
-  # Default sampling settings. Individual datasets can override global_downsample_rate.
-  global_downsample_rate: 1
+  # Default AgiBot sampling settings. EgoVerse overrides these below.
+  global_downsample_rate: 3
   video_action_freq_ratio: 2
 
 # Dataset configuration
 dataset:
   type: "multi"
   sampling: "weighted"
-  target_action_dim: 14
+  target_action_dim: 24
   target_state_dim: 14
   datasets:
-    - name: "bridge"
-      type: "bridge"
-      weight: 1.0
-      dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/bridge/bridge_dataset"
-      data_mode: "both"
+    - name: "agibot_lerobot_split"
+      type: "lerobot_agibot"
+      weight: 0.4425
       task_mode: "multi"
       task_name: null
       max_episodes: null
       image_aug: false
       use_language_action: true
-      enable_setup_control_suffix: false
-      setup_text: "single-arm WidowX robot with parallel gripper"
-      normalize_actions: true
-      stats_key: "bridge"
-      state_stats_signal: "qpos"
-      action_stats_signal: "epos"
+      params:
+        root: "/root/nas/code/d0/data/robot_data/AgiBotWorld2026"
+        repo_id: "AgiBotWorld2026"
+        # AgiBot disables action normalization, but the LeRobot base class still
+        # loads a stat key during init. Use an existing key to keep init valid.
+        embodiment_type: "aloha_agilex_2"
+        language_action_dir_name: "language_action"
+        enable_t5_fallback: false
+        task_discovery:
+          enabled: true
+          suffix: "_split"
+          required:
+            - "meta/info.json"
+            - "data"
+            - "videos"
       common:
-        global_downsample_rate: 1
+        global_downsample_rate: 3
+        video_action_freq_ratio: 2
 
-    - name: "droid"
+    - name: "human_video_egoverse"
+      type: "egoverse_trimodal"
+      weight: 0.5000
+      train_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/train.jsonl"
+      val_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/val.jsonl"
+      action_mode: "zeros"
+      image_aug: false
+      seed: 0
+      params:
+        adaptive_downsample: true
+        min_downsample_rate: 2
+        max_downsample_rate: 8
+      common:
+        global_downsample_rate: 8
+        video_action_freq_ratio: 2
+
+    - name: "droid_pt_v5"
       type: "droid"
-      weight: 1.0
-      dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/droid/droid_dataset"
+      weight: 0.0498
+      dataset_dir: "/root/nas/code/d0/data/robot_data/droid_dataset"
       data_mode: "both"
       task_mode: "multi"
       task_name: null
@@ -55,25 +79,13 @@ dataset:
       state_stats_signal: "qpos"
       action_stats_signal: "epos"
       common:
-        global_downsample_rate: 2
+        global_downsample_rate: 1
+        video_action_freq_ratio: 2
 
-    - name: "robotwin"
-      type: "robotwin"
-      weight: 1.0
-      dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/robotwin_dataset"
-      data_mode: "both"
-      task_mode: "multi"
-      task_name: null
-      max_episodes: null
-      image_aug: false
-      use_language_action: true
-      common:
-        global_downsample_rate: 3
-
-    - name: "fractal"
+    - name: "fractal_pt_v5"
       type: "fractal_bridge"
-      weight: 1.0
-      dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/fractal/fractal_dataset"
+      weight: 0.0055
+      dataset_dir: "/root/nas/code/d0/data/robot_data/fractal"
       data_mode: "both"
       task_mode: "multi"
       task_name: null
@@ -88,6 +100,27 @@ dataset:
       action_stats_signal: "epos"
       common:
         global_downsample_rate: 1
+        video_action_freq_ratio: 2
+
+    - name: "bridge_pt_v5"
+      type: "bridge"
+      weight: 0.0022
+      dataset_dir: "/root/nas/code/d0/data/robot_data/bridge_dataset"
+      data_mode: "both"
+      task_mode: "multi"
+      task_name: null
+      max_episodes: null
+      image_aug: false
+      use_language_action: true
+      enable_setup_control_suffix: false
+      setup_text: "single-arm WidowX robot with parallel gripper"
+      normalize_actions: true
+      stats_key: "bridge"
+      state_stats_signal: "qpos"
+      action_stats_signal: "epos"
+      common:
+        global_downsample_rate: 1
+        video_action_freq_ratio: 2
 
 # Model configuration
 model:
@@ -98,7 +131,8 @@ model:
     precision: "bfloat16"
 
   vlm:
-    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
+    # checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "/root/nas/xicheng/qwen3vl_2b_repro/outputs/qwen3vl2b_full_40pct_8gpu_nframes16/checkpoint-74056"
     precision: "bfloat16"
     frozen: false
 
@@ -157,8 +191,8 @@ system:
   checkpoint_dir: "./checkpoints"
   log_level: "INFO"
   log_interval: 1
-  save_interval: 50000
-  val_interval: 5000
+  save_interval: 100000
+  val_interval: 10000
   num_workers: 16
   pin_memory: true
 
@@ -176,4 +210,5 @@ resume:
 
 # Finetune settings
 finetune:
+  # checkpoint_path: ./pretrained_models/Motus
   checkpoint_path: ./pretrained_models/Motus

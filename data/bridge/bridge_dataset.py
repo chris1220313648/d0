@@ -59,7 +59,7 @@ class BridgeDataset(data.Dataset):
         state_stats_signal: str = "qpos",
         action_stats_signal: str = "epos",
         enable_setup_control_suffix: bool = False,
-        setup_text: str = "bimanual yam robotic arms in molmoact2",
+        setup_text: str = "single-arm WidowX robot with parallel gripper",
         randomized_limit_per_task: Optional[int] = None,  # kept for config compatibility; unused for bridge
         **kwargs,
     ):
@@ -271,7 +271,7 @@ class BridgeDataset(data.Dataset):
                 logger.info(f"  {tname}: {len(episodes)} episodes")
 
     def _load_language_embedding(self, lang_path: str) -> Tuple[torch.Tensor, int]:
-        embedding_data = torch.load(lang_path, map_location="cpu")
+        embedding_data = torch.load(lang_path, map_location="cpu", weights_only=True)
         if isinstance(embedding_data, list):
             selected_idx = random.randint(0, len(embedding_data) - 1)
             embeddings = embedding_data[selected_idx]
@@ -331,8 +331,8 @@ class BridgeDataset(data.Dataset):
         action_indices: List[int],
         action_stats_signal: Optional[str] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        qpos_data = torch.load(qpos_path, map_location="cpu").float()
-        epos_data = torch.load(epos_path, map_location="cpu").float()
+        qpos_data = torch.load(qpos_path, map_location="cpu", weights_only=True).float()
+        epos_data = torch.load(epos_path, map_location="cpu", weights_only=True).float()
 
         if qpos_data.ndim != 2:
             raise ValueError(f"qpos tensor must be [T,D], got {tuple(qpos_data.shape)} at {qpos_path}")

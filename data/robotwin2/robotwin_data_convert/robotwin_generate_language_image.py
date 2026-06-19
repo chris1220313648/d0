@@ -671,7 +671,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vlm-checkpoint-path",
         type=str,
-        default="/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct",
+        default="./pretrained_models/Qwen3-VL-2B-Instruct",
         help="Qwen-VL checkpoint path or HF model id.",
     )
     parser.add_argument(

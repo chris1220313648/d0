@@ -36,6 +36,94 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*multichanne
 logger = logging.getLogger(__name__)
 
 
+class _LocalMultiLeRobotDataset(data.Dataset):
+    """Concatenate local LeRobot datasets without aggregating raw stats."""
+
+    def __init__(
+        self,
+        repo_ids: List[str],
+        root: Optional[str | Path] = None,
+        episodes: Optional[Dict[str, List[int]]] = None,
+        image_transforms: Optional[Any] = None,
+        delta_timestamps: Optional[Any] = None,
+        tolerances_s: Optional[Dict[str, float]] = None,
+        download_videos: bool = True,
+        video_backend: Optional[str] = None,
+    ):
+        super().__init__()
+        self.repo_ids = list(repo_ids)
+        self.root = Path(root) if root is not None else None
+        self.tolerances_s = tolerances_s if tolerances_s else dict.fromkeys(self.repo_ids, 0.0001)
+
+        self._datasets = []
+        for repo_id in self.repo_ids:
+            dataset_root = self.root / repo_id if self.root is not None else None
+            self._datasets.append(
+                LeRobotDataset(
+                    repo_id,
+                    root=dataset_root,
+                    episodes=episodes[repo_id] if episodes else None,
+                    image_transforms=image_transforms,
+                    delta_timestamps=delta_timestamps,
+                    tolerance_s=self.tolerances_s[repo_id],
+                    download_videos=download_videos,
+                    video_backend=video_backend,
+                )
+            )
+
+        self.disabled_features = set()
+        if self._datasets:
+            common_features = set(self._datasets[0].features)
+            for dataset in self._datasets[1:]:
+                common_features.intersection_update(dataset.features)
+            for dataset in self._datasets:
+                self.disabled_features.update(set(dataset.features).difference(common_features))
+
+    @property
+    def features(self):
+        if not self._datasets:
+            return {}
+        features = {}
+        for dataset in self._datasets:
+            features.update({k: v for k, v in dataset.features.items() if k not in self.disabled_features})
+        return features
+
+    @property
+    def num_frames(self) -> int:
+        return sum(int(dataset.num_frames) for dataset in self._datasets)
+
+    @property
+    def num_episodes(self) -> int:
+        return sum(int(dataset.num_episodes) for dataset in self._datasets)
+
+    @property
+    def fps(self) -> int:
+        return self._datasets[0].meta.info["fps"]
+
+    @property
+    def tolerance_s(self) -> float:
+        return 1 / self.fps - 1e-4
+
+    def __len__(self):
+        return self.num_frames
+
+    def __getitem__(self, idx: int):
+        if idx >= len(self):
+            raise IndexError(f"Index {idx} out of bounds.")
+        start_idx = 0
+        for dataset_idx, dataset in enumerate(self._datasets):
+            if idx >= start_idx + dataset.num_frames:
+                start_idx += dataset.num_frames
+                continue
+            item = dataset[idx - start_idx]
+            item["dataset_index"] = torch.tensor(dataset_idx)
+            for key in self.disabled_features:
+                if key in item:
+                    del item[key]
+            return item
+        raise IndexError(f"Index {idx} out of bounds.")
+
+
 class LeRobotMotusDataset(data.Dataset):
     """
     Motus-compatible dataset wrapper for LeRobotDataset.
@@ -148,7 +236,9 @@ class LeRobotMotusDataset(data.Dataset):
 
         embodiment_type: str = "aloha_agilex_2", # for loading normalization statistics
         task_mode: str = "single", # "single" or "multi"
-        task_name: str = "null",
+        task_name: Optional[str | List[str]] = None,
+        task_discovery: Optional[Dict[str, Any]] = None,
+        use_multi_lerobot_dataset: bool = True,
         **kwargs
     ):
         super().__init__()
@@ -182,7 +272,10 @@ class LeRobotMotusDataset(data.Dataset):
         self.max_episodes = max_episodes
         self.image_aug = image_aug # No extra augmentation on LeRobot side for now
         self.task_mode = task_mode
+        if isinstance(task_name, str) and task_name.strip().lower() in {"", "none", "null"}:
+            task_name = None
         self.task_name = task_name
+        self.task_discovery = task_discovery
         
         # ---- T5 fallback config (lazy init) ----
         self.enable_t5_fallback = bool(enable_t5_fallback)
@@ -221,7 +314,9 @@ class LeRobotMotusDataset(data.Dataset):
 
             self.episode_ids = all_ep_ids
         elif self.task_mode == "multi":
-            if self.task_name == None:
+            if self.task_discovery and bool(self.task_discovery.get("enabled", False)):
+                self.repo_ids = self._discover_task_names(self.root, self.task_discovery)
+            elif self.task_name is None:
                 self.repo_ids = [task_name for task_name in os.listdir(self.root) if os.path.isdir(os.path.join(self.root, task_name))]
             elif isinstance(self.task_name, list):
                 self.repo_ids = self.task_name
@@ -251,11 +346,12 @@ class LeRobotMotusDataset(data.Dataset):
                 video_backend=resolved_video_backend
             )
         elif self.task_mode == "multi":
-            self.lerobot_dataset = MultiLeRobotDataset(
-                repo_ids=self.repo_ids, 
+            multi_dataset_cls = MultiLeRobotDataset if use_multi_lerobot_dataset else _LocalMultiLeRobotDataset
+            self.lerobot_dataset = multi_dataset_cls(
+                repo_ids=self.repo_ids,
                 root=self.root,
                 episodes=self.episode_ids,
-                video_backend=resolved_video_backend
+                video_backend=resolved_video_backend,
             )
             self.episode_id_to_task_idx = []
             self.episode_num_accumulated = []
@@ -333,6 +429,33 @@ class LeRobotMotusDataset(data.Dataset):
             total_selected = sum(len(ep_ids) for ep_ids in self.episode_ids.values())
             logger.info(f"Selected episodes: {total_selected} (across {len(self.repo_ids)} repos)")
         logger.info(f"Video size: {self.video_size}, Frames: {self.num_video_frames}")
+
+    @staticmethod
+    def _discover_task_names(root: Optional[str], task_discovery: Dict[str, Any]) -> List[str]:
+        if root is None:
+            raise ValueError("LeRobot task discovery requires a local root path")
+        root_path = Path(root)
+        if not root_path.is_dir():
+            raise FileNotFoundError(f"LeRobot task discovery root not found: {root}")
+
+        suffix = str(task_discovery.get("suffix", "") or "")
+        required = task_discovery.get("required", ["meta/info.json", "data", "videos"])
+        if isinstance(required, str):
+            required = [required]
+
+        task_names: List[str] = []
+        for path in root_path.rglob("*"):
+            if not path.is_dir():
+                continue
+            if suffix and not path.name.endswith(suffix):
+                continue
+            if all((path / str(rel_path)).exists() for rel_path in required):
+                task_names.append(path.relative_to(root_path).as_posix())
+
+        task_names = sorted(task_names)
+        if not task_names:
+            raise ValueError(f"No LeRobot datasets discovered under {root_path} with suffix {suffix!r}")
+        return task_names
 
     def _episodes_jsonl_path(self) -> Path:
         if self.lerobot_dataset is None:
@@ -860,4 +983,3 @@ class LeRobotMotusDataset(data.Dataset):
                 video_indices.append(action_indices[-1])
         
         return condition_frame_idx, video_indices, action_indices
-        

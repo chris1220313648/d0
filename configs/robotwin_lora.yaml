@@ -40,21 +40,21 @@ dataset:
 model:
   # WAN Video Model settings
   wan:
-    config_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    vae_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    checkpoint_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    vae_path: "./pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
   
   # VLM settings
   vlm:
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: false               # Keep base VLM frozen; LoRA adapters will be trainable
     # Optional: export full finetuned VLM as HuggingFace save_pretrained directory
     export_pretrained: true
     # If null, exported under checkpoint_step_xxx/vlm_pretrained_0
     # You can set to:
-    # /data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct
+    # ./pretrained_models/Qwen3-VL-2B-Instruct
     export_pretrained_dir: null
     lora:
       enabled: true
@@ -172,4 +172,4 @@ resume:
   
 # Finetune settings 
 finetune:
-  checkpoint_path: /data/user/wsong890/user68/cjy/Motus/pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)
+  checkpoint_path: ./pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)

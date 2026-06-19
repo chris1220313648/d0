@@ -14,8 +14,8 @@ from a sliding window:
 
 Language action formatting aligns with LAP-style numeric summarization:
   - verbose + rotation
-  - sum_decimal = "0f"
-  - rotation rounded to nearest 10 degrees
+  - sum_decimal = "1f"
+  - rotation rounded to nearest 1 degree
   - supports delta-action inputs and absolute-pose inputs
 """
 
@@ -61,7 +61,7 @@ def summarize_numeric_actions(
     arr_like: np.ndarray,
     sum_decimal: str,
     include_rotation: bool = False,
-    rotation_precision: int = 10,
+    rotation_precision: int = 1,
     include_gripper_action: bool = True,
 ) -> str | None:
     """
@@ -380,28 +380,28 @@ def _summarize_window(
     if dim == 14:
         text = summarize_bimanual_numeric_actions(
             delta_window,
-            sum_decimal="0f",
+            sum_decimal="1f",
             include_rotation=True,
             include_gripper_action=include_gripper_action,
         )
     elif dim == 12:
         text = summarize_bimanual_numeric_actions(
             delta_window,
-            sum_decimal="0f",
+            sum_decimal="1f",
             include_rotation=True,
             include_gripper_action=False,
         )
     elif dim == 7:
         text = summarize_numeric_actions(
             delta_window,
-            sum_decimal="0f",
+            sum_decimal="1f",
             include_rotation=True,
             include_gripper_action=include_gripper_action,
         )
     elif dim == 6:
         text = summarize_numeric_actions(
             delta_window,
-            sum_decimal="0f",
+            sum_decimal="1f",
             include_rotation=True,
             include_gripper_action=False,
         )

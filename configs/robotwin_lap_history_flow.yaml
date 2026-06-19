@@ -25,13 +25,13 @@ dataset:
 
 model:
   wan:
-    config_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B"
-    vae_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    checkpoint_path: "./pretrained_models/Wan2.2-TI2V-5B"
+    vae_path: "./pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
 
   vlm:
-    checkpoint_path: "/data/user/wsong890/user68/cjy/Motus/pretrained_models/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: false
 

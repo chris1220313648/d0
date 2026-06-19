@@ -1,33 +1,68 @@
 common:
-  # Robot dimensions
-  action_dim: 7
-  state_dim: 7
+  # AgiBot uses 24-D actions; EgoVerse zero placeholders are padded/masked to match.
+  action_dim: 24
+  state_dim: 14
 
-  # Video settings
-  num_video_frames: 8 #5hz
+  # Shared video settings
+  num_video_frames: 8
   video_height: 384
   video_width: 320
 
-  # Sampling strategy parameters
+  # AgiBot action horizon: num_video_frames * video_action_freq_ratio = 48.
   global_downsample_rate: 1
-  video_action_freq_ratio: 2
+  video_action_freq_ratio: 6
 
 # Dataset configuration
 dataset:
-  type: "bridge"
-  dataset_dir: "/data/user/wsong890/user68/cjy/Motus/data/bridge/bridge_dataset"
-  data_mode: "both"      # train, test, both
-  task_mode: "multi"     # single, multi
-  task_name: null
-  max_episodes: null
-  image_aug: false
-  use_language_action: true
-  enable_setup_control_suffix: false
-  setup_text: "single-arm WidowX robot with parallel gripper"
-  normalize_actions: true
-  stats_key: "bridge"
-  state_stats_signal: "qpos"
-  action_stats_signal: "epos"
+  type: "multi"
+  sampling: "weighted"
+  target_action_dim: 24
+  target_state_dim: 14
+  datasets:
+    - name: "agibot_lerobot"
+      type: "lerobot_agibot"
+      weight: 2.0
+      max_episodes: null
+      image_aug: false
+
+      task_mode: "multi"
+      task_name: null
+      use_language_action: true
+
+      params:
+        # Replace these before launching training.
+        repo_id: "TODO_SET_AGIBOT_REPO_ID"
+        root: "TODO_SET_AGIBOT_LEROBOT_ROOT"
+
+        embodiment_type: "agibot"
+        language_action_dir_name: "language_action"
+        normalize_actions: false
+
+        enable_t5_fallback: true
+        t5_wan_path: "./pretrained_models"
+        t5_folder_name: "t5_embedding"
+        t5_text_len: 512
+
+      common:
+        global_downsample_rate: 1
+        video_action_freq_ratio: 6
+
+    - name: "human_video_egoverse"
+      type: "egoverse_trimodal"
+      weight: 1.0
+      train_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/train.jsonl"
+      val_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/val.jsonl"
+      action_mode: "zeros"
+      image_aug: false
+      seed: 0
+      params:
+        adaptive_downsample: true
+        min_downsample_rate: 2
+        max_downsample_rate: 8
+
+      common:
+        global_downsample_rate: 8
+        video_action_freq_ratio: 6
 
 # Model configuration
 model:
@@ -78,7 +113,7 @@ model:
 
 # Training configuration
 training:
-  batch_size: 4
+  batch_size: 6
   max_steps: 400000
   learning_rate: 5.0e-5
   weight_decay: 0.01
@@ -116,4 +151,4 @@ resume:
 
 # Finetune settings
 finetune:
-  checkpoint_path: ./pretrained_models/Motus
+  checkpoint_path: null

@@ -63,8 +63,16 @@ class MultiDataset(Dataset):
         if sample.get('action_sequence') is not None:
             actions = sample['action_sequence']
             sample['action_sequence'] = _pad_last_dim(actions, self.target_action_dim, 'action_sequence')
-            action_mask = torch.zeros_like(sample['action_sequence'], dtype=torch.bool)
-            action_mask[..., :actions.shape[-1]] = True
+            child_action_mask = sample.get('action_mask')
+            if child_action_mask is not None:
+                action_mask = _pad_last_dim(
+                    child_action_mask.to(dtype=torch.bool),
+                    self.target_action_dim,
+                    'action_mask',
+                )
+            else:
+                action_mask = torch.zeros_like(sample['action_sequence'], dtype=torch.bool)
+                action_mask[..., :actions.shape[-1]] = True
             sample['action_mask'] = action_mask
 
         if sample.get('history_action_sequence') is not None:
@@ -76,6 +84,8 @@ class MultiDataset(Dataset):
 
         if sample.get('initial_state') is not None:
             sample['initial_state'] = _pad_last_dim(sample['initial_state'], self.target_state_dim, 'initial_state')
+        else:
+            sample['initial_state'] = torch.zeros(self.target_state_dim, dtype=sample['action_sequence'].dtype)
 
         return sample
 
@@ -286,6 +296,37 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
 
         return LatentActionDataset(**params)
 
+    elif dataset_type == 'egoverse_trimodal':
+        from .human_data.motus_pretrain.loader.egoverse_vgm_dataset import EgoVerseTrimodalDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'action_dim': config.common.action_dim,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        for key in ['train_manifest', 'val_manifest', 'manifest', 'max_samples', 'seed', 'action_mode']:
+            if hasattr(config.dataset, key):
+                params[key] = getattr(config.dataset, key)
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        params['val'] = val
+
+        return EgoVerseTrimodalDataset(**params)
+
     elif dataset_type == 'aloha_agilex_2':
         from .aloha_agilex_2.aloha_agilex2_dataset import AlohaAgilex2Dataset
         
@@ -369,6 +410,50 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         params['val'] = val
         
         return LeRobotMotusDataset(**params)
+
+    elif dataset_type == 'lerobot_agibot':
+        from .lerobot.lerobot_agibot_dataset import LeRobotAgiBotDataset
+
+        # Get all parameters from config
+        params = {}
+
+        # Add common parameters
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        # Add dataset-specific parameters
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        # Add VLM checkpoint path
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        # Add any additional parameters from dataset.params
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+
+        # Set validation flag
+        params['val'] = val
+
+        return LeRobotAgiBotDataset(**params)
 
     elif dataset_type == 'bridge':
         from .bridge.bridge_dataset import BridgeDataset
@@ -545,7 +630,7 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         return DroidDataset(**params)
     
     else:
-        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, latent_action")
+        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, lerobot_agibot, latent_action, egoverse_trimodal")
 
 
 def _process_vlm_inputs_batch(vlm_inputs: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
@@ -599,14 +684,8 @@ def _process_vlm_inputs_batch_lap(vlm_inputs: List[Dict[str, Any]]) -> Dict[str,
     pixel_values_list = [vlm_input.get('pixel_values') for vlm_input in vlm_inputs]
     image_grid_thw_list = [vlm_input.get('image_grid_thw') for vlm_input in vlm_inputs]
     attention_mask_list = [vlm_input.get('attention_mask') for vlm_input in vlm_inputs]
-    if any(vlm_input.get('labels') is not None for vlm_input in vlm_inputs):
-        labels_list = [vlm_input.get('labels') for vlm_input in vlm_inputs]
-    else:
-        labels_list = None
-    if any(vlm_input.get('answer_start') is not None for vlm_input in vlm_inputs):
-        answer_start_list = [vlm_input.get('answer_start') for vlm_input in vlm_inputs]
-    else:
-        answer_start_list = None
+    labels_list = [vlm_input.get('labels') for vlm_input in vlm_inputs]
+    answer_start_list = [vlm_input.get('answer_start') for vlm_input in vlm_inputs]
     # if any(vlm_input.get('language_action') is not None for vlm_input in vlm_inputs):
     #     language_action_list = [vlm_input.get('language_action') for vlm_input in vlm_inputs]
     # else:
@@ -617,8 +696,20 @@ def _process_vlm_inputs_batch_lap(vlm_inputs: List[Dict[str, Any]]) -> Dict[str,
     padded_input_ids = []
     padded_attention_masks = []
     padded_labels_list = []
+    padded_answer_start_list = []
 
-    for ids, mask, labels in zip(input_ids_list, attention_mask_list,labels_list):
+    for ids, mask, labels, answer_start in zip(input_ids_list, attention_mask_list, labels_list, answer_start_list):
+        if labels is None:
+            labels = torch.full_like(ids, -100)
+        if answer_start is None:
+            if mask is not None:
+                answer_start = mask.to(dtype=torch.long).sum(dim=1)
+            else:
+                answer_start = torch.full((ids.shape[0],), ids.shape[1], dtype=torch.long, device=ids.device)
+        elif torch.is_tensor(answer_start):
+            answer_start = answer_start.to(dtype=torch.long, device=ids.device).reshape(-1)
+        else:
+            answer_start = torch.as_tensor(answer_start, dtype=torch.long, device=ids.device).reshape(-1)
         if ids.shape[1] < max_seq_len:
             padding_size = max_seq_len - ids.shape[1]
             # Pad input_ids
@@ -630,11 +721,8 @@ def _process_vlm_inputs_batch_lap(vlm_inputs: List[Dict[str, Any]]) -> Dict[str,
                 padded_mask = torch.cat([mask, mask_padding], dim=1)
             else:
                 padded_mask = None
-            if labels is not None:
-                labels_padding = torch.full((mask.shape[0], padding_size), -100, dtype=labels.dtype, device=labels.device)
-                padded_labels = torch.cat([labels, labels_padding], dim=1)
-            else:
-                padded_labels = None
+            labels_padding = torch.full((ids.shape[0], padding_size), -100, dtype=labels.dtype, device=labels.device)
+            padded_labels = torch.cat([labels, labels_padding], dim=1)
         else:
             padded_ids = ids
             padded_mask = mask
@@ -642,6 +730,7 @@ def _process_vlm_inputs_batch_lap(vlm_inputs: List[Dict[str, Any]]) -> Dict[str,
         padded_input_ids.append(padded_ids)
         padded_attention_masks.append(padded_mask)
         padded_labels_list.append(padded_labels)
+        padded_answer_start_list.append(answer_start)
     
     # Batch everything
     return {
@@ -650,7 +739,7 @@ def _process_vlm_inputs_batch_lap(vlm_inputs: List[Dict[str, Any]]) -> Dict[str,
         'image_grid_thw': torch.cat([igt for igt in image_grid_thw_list if igt is not None], dim=0) if image_grid_thw_list and any(igt is not None for igt in image_grid_thw_list) else None,
         'attention_mask': torch.cat([mask for mask in padded_attention_masks if mask is not None], dim=0) if any(mask is not None for mask in padded_attention_masks) else None,
         'labels': torch.cat(padded_labels_list, dim=0),
-        'answer_start': torch.cat([answer_start for answer_start in answer_start_list if answer_start is not None], dim=0) if any(answer_start is not None for answer_start in answer_start_list) else None,
+        'answer_start': torch.cat(padded_answer_start_list, dim=0),
         # 'language_action': torch.cat([language_action for language_action in language_action_list if language_action is not None], dim=0) if any(language_action is not None for language_action in language_action_list) else None,
     }
 

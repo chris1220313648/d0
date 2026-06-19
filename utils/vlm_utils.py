@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def append_setup_control_suffix(
     text_instruction: str,
     enable_setup_control_suffix: bool = False,
-    setup_text: str = "bimanual yam robotic arms in molmoact2",
+    setup_text: str = "single-arm robot with gripper",
     action_signal: str = "epos",
 ) -> str:
     """
@@ -27,18 +27,18 @@ def append_setup_control_suffix(
         signal = "qpos"
 
     if signal == "epos":
-        control_text = "delta end-effector pose"
+        control_text = "delta end-effector pose control"
     elif signal == "qpos":
-        control_text = "absolute joint pose"
+        control_text = "absolute joint angle control"
     else:
-        control_text = "absolute joint pose"
+        control_text = "absolute joint angle control"
         logger.warning(
             "Unknown action_signal '%s' for setup/control suffix, fallback to '%s'",
             action_signal,
             control_text,
         )
 
-    setup_clean = str(setup_text or "bimanual yam robotic arms in molmoact2").strip()
+    setup_clean = str(setup_text or "single-arm robot with gripper").strip()
     suffix = (
         f"<setup_start>{setup_clean}<setup_end>, and "
         f"<control_start>{control_text}<control_end>."
@@ -133,7 +133,7 @@ def preprocess_vlm_messages_lap(
     if use_ik_question:
         question = "predict the robot's action between two images in the prediction"
     else:
-        question = f"任务：{text_instruction}\n请给出下一步动作语言描述。"
+        question = f"Task：{text_instruction}\nPlease provide a language description of the next action."
     user_content = [{"type": "image", "image": image_pil}]
     if use_ik_question and final_frame_pil is not None:
         # print("use_ik_question")

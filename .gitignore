@@ -21,6 +21,7 @@ data/bridge/bridge_dataset/
 data/droid/droid_dataset/
 data/fractal/fractal_dataset/
 data/lerobot/AgiBotWorld2026_extracted
+data/robot_data
 # data/*
 MemFlow/
 output/

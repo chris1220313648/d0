@@ -21,7 +21,7 @@ on-the-fly encoding.
 
 An example of using this script:
 
-export WAN_PATH=/share/home/bhz/pretrained_models
+export WAN_PATH=./pretrained_models
 
 python /share/home/lht/Motus/data/lerobot/add_t5_cache_to_lerobot_dataset.py \
   --repo_id randomized_only50/beat_block_hammer \
