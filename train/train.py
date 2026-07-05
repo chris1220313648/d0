@@ -110,6 +110,12 @@ def load_config(config_path: str) -> OmegaConf:
         raise ValueError(
             f"model.flow_source.mode must be 'gaussian' or 'history', got {flow_source_mode}"
         )
+    flow_source_video_mode = flow_source.get('video_mode', flow_source_mode)
+    if flow_source_video_mode not in {'gaussian', 'history'}:
+        raise ValueError(
+            "model.flow_source.video_mode must be 'gaussian' or 'history', "
+            f"got {flow_source_video_mode}"
+        )
     if flow_source_mode == 'history':
         history_length = int(
             flow_source.get('history_length', config.common.action_chunk_size)
@@ -457,7 +463,7 @@ class UniDiffuserTrainer:
                     f"LR(main/wan): {lr_main:.2e}/{lr_wan:.2e}, Time: {step_time:.2f}s"
                 )
                 
-                if "llm_loss" in metrics:
+                if "llm_loss" in metrics and metrics['llm_loss'] is not None:
                     log_str += f", LLM Loss: {metrics['llm_loss']:.4f}"
                 logger.info(log_str)
                 
@@ -543,6 +549,10 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         video_loss_weight=config.model.loss_weights.video_loss_weight,
         action_loss_weight=config.model.loss_weights.action_loss_weight,
         flow_source_mode=config.model.get('flow_source', {}).get('mode', 'gaussian'),
+        flow_source_video_mode=config.model.get('flow_source', {}).get(
+            'video_mode',
+            config.model.get('flow_source', {}).get('mode', 'gaussian'),
+        ),
         flow_source_action_noise_std=float(
             config.model.get('flow_source', {}).get('action_noise_std', 0.0)
         ),

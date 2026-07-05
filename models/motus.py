@@ -76,8 +76,10 @@ class MotusConfig:
     video_loss_weight: float = 1.0
     action_loss_weight: float = 1.0
 
-    # Flow source. "gaussian" preserves the original behavior.
+    # Action and video flow sources. A missing video mode follows the action
+    # mode for compatibility with checkpoints created before they were split.
     flow_source_mode: str = "gaussian"
+    flow_source_video_mode: Optional[str] = None
     flow_source_action_noise_std: float = 0.0
 
     # Control whether to load pretrained WAN/VLM backbones.
@@ -91,6 +93,13 @@ class MotusConfig:
         if self.flow_source_mode not in {"gaussian", "history"}:
             raise ValueError(
                 f"flow_source_mode must be 'gaussian' or 'history', got {self.flow_source_mode}"
+            )
+        if self.flow_source_video_mode is None:
+            self.flow_source_video_mode = self.flow_source_mode
+        if self.flow_source_video_mode not in {"gaussian", "history"}:
+            raise ValueError(
+                "flow_source_video_mode must be 'gaussian' or 'history', "
+                f"got {self.flow_source_video_mode}"
             )
         if self.flow_source_action_noise_std < 0:
             raise ValueError("flow_source_action_noise_std must be non-negative")
@@ -896,7 +905,7 @@ class Motus(nn.Module):
         video_t_embed = self.fm_train_scheduler.timesteps[timestep_id].to(dtype=self.dtype, device=self.device)  # [B]
         # Sigma for noise mixture
         sigma = self.fm_train_scheduler.sigmas[timestep_id].to(dtype=self.dtype, device=self.device).view(B, 1, 1, 1, 1)
-        if self.config.flow_source_mode == "history":
+        if self.config.flow_source_video_mode == "history":
             video_source = condition_frame_latent.expand(
                 -1, -1, clean_full_latent.shape[2], -1, -1
             )
@@ -1076,7 +1085,7 @@ class Motus(nn.Module):
         # Init video/action latents
         B, C_latent, f_latent, H_latent, W_latent = condition_frame_latent.shape
         num_total_latent_frames = 1 + self.config.num_video_frames // 4
-        if self.config.flow_source_mode == "history":
+        if self.config.flow_source_video_mode == "history":
             video_latent = condition_frame_latent.expand(
                 -1, -1, num_total_latent_frames, -1, -1
             ).clone()

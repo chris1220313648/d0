@@ -55,7 +55,7 @@ dataset:
       state_stats_signal: "qpos"
       action_stats_signal: "epos"
       common:
-        global_downsample_rate: 2
+        global_downsample_rate: 1
 
     - name: "robotwin"
       type: "robotwin"
