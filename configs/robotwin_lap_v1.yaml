@@ -162,11 +162,11 @@ logging:
 
 # Resume training settings
 resume:
-  checkpoint_path: /root/nas/code/d0/checkpoints/robotwin_lap/robotwin_lap_hypertrain_v0/checkpoint_step_25000 # Path to checkpoint to resume from
+  checkpoint_path: null # Path to checkpoint to resume from
   reset_scheduler: false
 # Finetune settings 
 finetune:
   # checkpoint_path: ./pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)
   # checkpoint_path: /data/user/wsong890/user68/cjy/Motus/checkpoints/multidataset_lap/multidataset_multidataset_lap_multi_node/checkpoint_step_400000/pytorch_model
   # checkpoint_path: /root/nas/code/d0/pretrained_models/Motus
-  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v0/multidataset_lap_v0_lap_hypertrain/checkpoint_step_400000/pytorch_model/mp_rank_00_model_states.pt
+  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v1/multidataset_lap_v1_lap_hypertrain/checkpoint_step_300000/pytorch_model/mp_rank_00_model_states.pt

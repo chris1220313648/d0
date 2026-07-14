@@ -14,4 +14,8 @@
 - Use parameters/flags to gate new behavior.
 
 ## GPU Job Submission
-- Use this Slurm template for GPU jobs: `/data/user/wsong890/user68/cjy/Motus/scripts/slurm/exmaple.sh`
+- Use this Slurm template for GPU jobs: ./scripts/slurm/exmaple.sh`
+
+## 存储设置
+大数据文件存放在/root/nasbak/cjy/robot_raw,训练用权重除外
+

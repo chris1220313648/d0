@@ -346,6 +346,9 @@ class UniDiffuserTrainer:
         action_mask = batch.get('action_mask', None)
         if action_mask is not None:
             action_mask = action_mask.to(self.device)
+        video_mask = batch.get('video_mask', None)
+        if video_mask is not None:
+            video_mask = video_mask.to(self.device)
         # Handle VLM inputs - it's a Dict[str, Tensor] from collate_fn
         vlm_inputs = batch['vlm_inputs']
         if vlm_inputs is not None:
@@ -365,6 +368,7 @@ class UniDiffuserTrainer:
             language_embeddings=language_embeddings,  # For WAN cross attention
             vlm_inputs=vlm_inputs,  # Complete VLM inputs from dataset
             action_mask=action_mask,
+            video_mask=video_mask,
             return_dict=True,
             train_lap=self.train_lap,
         )
@@ -754,6 +758,15 @@ def main():
     rank = accelerator.process_index
     world_size = accelerator.num_processes
     setup_logging(rank, args.log_level)
+
+    # Set deterministic seed per process for reproducible data sharding
+    import random, numpy as np
+    seed = 42 + accelerator.process_index
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     
     # Create run name with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

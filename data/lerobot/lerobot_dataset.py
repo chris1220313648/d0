@@ -154,6 +154,10 @@ class LeRobotMotusDataset(data.Dataset):
     |   |   ├── episode_000000.pt
     |   |   ├── episode_000001.pt
     |   |   └── ...
+    |   ├── language_action/  # optional, used by specialized LAP loaders
+    |   |   ├── episode_000000.txt
+    |   |   ├── episode_000001.txt
+    |   |   └── ...
     |   └── videos/
     |   |   ├── chunk-000/
     |   |   │   ├── observation.images.cam_concatenated/
@@ -191,6 +195,11 @@ class LeRobotMotusDataset(data.Dataset):
     |   |   │   │   └── ...
     |   |   │   └── ...
     |   |   └── ...
+
+    If offline language embeddings are used, meta/episodes.jsonl should contain
+    t5_embedding_path entries such as "t5_embedding/episode_000000.pt". LAP-style
+    loaders can additionally use language_action_path entries such as
+    "language_action/episode_000000.txt".
     """
     
     def __init__(

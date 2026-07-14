@@ -38,14 +38,24 @@ class RobotWinTaskDataset(data.Dataset):
     /share/dataset/preprocess/robotwin2/
     ├── clean/
     │   ├── adjust_bottle/
-    │   │   ├── qpos/           # Robot position files (.pt)
-    │   │   ├── videos/         # MP4 video files  
-    │   │   └── umt5_wan/       # Pre-encoded language embeddings (.pt)
+    │   │   ├── videos/         # <episode_id>.mp4
+    │   │   ├── qpos/           # <episode_id>.pt robot state files
+    │   │   ├── epos/           # <episode_id>.pt action files
+    │   │   ├── umt5_wan/       # <episode_id>.pt language embeddings
+    │   │   └── language_action/# <episode_id>.txt, used when enabled
     │   ├── beat_block_hammer/
     │   └── ...
     └── randomized/
         ├── adjust_bottle/
+        │   ├── videos/
+        │   ├── qpos/
+        │   ├── epos/
+        │   ├── umt5_wan/
+        │   └── language_action/
         └── ...
+
+    Episode files are matched by basename across videos, qpos, epos, umt5_wan,
+    and, when use_language_action=True, language_action.
     """
     
     def __init__(

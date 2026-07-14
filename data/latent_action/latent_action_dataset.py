@@ -37,7 +37,7 @@ def _has_triplet_subdirs(directory: Path) -> bool:
 
 
 def _find_leaf_dataset_dirs(root: Path) -> List[Path]:
-    """Recursively find directories that contain videos/umt5_wan/latent_action subfolders."""
+    """Recursively find directories that contain videos/umt5_wan/latent_action_dim14 subfolders."""
     results: List[Path] = []
     try:
         if _has_triplet_subdirs(root):
@@ -56,11 +56,23 @@ class LatentActionDataset(data.Dataset):
     Multi-source pretraining dataset using latent_action as action supervision.
 
     Directory patterns:
-      - Standard: <root>/{videos, umt5_wan, latent_action}
+      - Standard: <root>/{videos, umt5_wan, latent_action_dim14}
       - Special: recurse into subfolders (e.g., robotwin2_copy/clean) until a leaf folder containing all three exists
 
+    Expected leaf data structure:
+      <dataset_dir_or_nested_leaf>/
+        videos/
+          <episode_id>.mp4
+          ...
+        umt5_wan/
+          <episode_id>.pt
+          ...
+        latent_action_dim14/
+          <episode_id>.pt
+          ...
+
     Alignment rules:
-      - Use video basename as episode id; require a one-to-one match across videos, umt5_wan and latent_action
+      - Use video basename as episode id; require a one-to-one match across videos, umt5_wan and latent_action_dim14
       - Sampling: given condition_frame_idx and global_downsample_rate step
         video_indices = cond + (i+1)*step, i=0..num_video_frames-1
         action_indices = cond + i*step,    i=0..num_video_frames-1   (start frame for adjacent-frame latent action)

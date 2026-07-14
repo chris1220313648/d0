@@ -55,6 +55,11 @@ class ACOneDataset(data.Dataset):
     │   │       └── task_variant_1.pt
     │   └── ...
     └── task_category_2/
+
+    The loader recursively finds task variant folders containing videos/,
+    qpos/, and instructions/. Episode files are matched by numeric basename,
+    for example videos/0.mp4 with qpos/0.pt. The instructions directory stores
+    task text and optional precomputed language embeddings.
     """
     
     def __init__(

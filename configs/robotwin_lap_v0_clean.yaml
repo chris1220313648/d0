@@ -23,7 +23,7 @@ dataset:
   dataset_dir: "/root/nas/code/d0/data/robot_data/robotwin/dataset"
   
   # RobotWin specific parameters
-  data_mode: "both"  # "clean", "randomized", or "both"
+  data_mode: "clean"  # "clean", "randomized", or "both"
   task_mode: "multi"  # "single" or "multi"
   task_name: null     # Required for single task mode (e.g., "adjust_bottle")
   # Optional cap: limit randomized split to first N episodes per task
@@ -107,7 +107,7 @@ training:
   batch_size: 5
   # batch_size: 8
   # max_steps: 1000000
-  max_steps: 100000
+  max_steps: 25000
   learning_rate: 5.0e-5
   # Optional: separate learning rate for WAN (video model). If omitted, falls back to learning_rate
   # wan_learning_rate: 5.0e-5
@@ -138,7 +138,7 @@ system:
   
   # Intervals
   log_interval: 1       # Log every N steps
-  save_interval: 25000    # Save every N steps  
+  save_interval: 12500    # Save every N steps  
   val_interval: 5000     # Validate every N steps
   
   # Hardware settings
@@ -162,11 +162,11 @@ logging:
 
 # Resume training settings
 resume:
-  checkpoint_path: /root/nas/code/d0/checkpoints/robotwin_lap/robotwin_lap_hypertrain_v0/checkpoint_step_25000 # Path to checkpoint to resume from
+  checkpoint_path: null # Path to checkpoint to resume from
   reset_scheduler: false
 # Finetune settings 
 finetune:
   # checkpoint_path: ./pretrained_models/Motus  # (directory containing mp_rank_00_model_states.pt)
   # checkpoint_path: /data/user/wsong890/user68/cjy/Motus/checkpoints/multidataset_lap/multidataset_multidataset_lap_multi_node/checkpoint_step_400000/pytorch_model
   # checkpoint_path: /root/nas/code/d0/pretrained_models/Motus
-  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v0/multidataset_lap_v0_lap_hypertrain/checkpoint_step_400000/pytorch_model/mp_rank_00_model_states.pt
+  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v0/multidataset_lap_v0_lap_hypertrain/checkpoint_step_400000

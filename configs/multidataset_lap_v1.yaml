@@ -48,8 +48,7 @@ dataset:
 
     - name: "human_video_egoverse"
       type: "egoverse_trimodal"
-      weight: 0.5000
-      use_for_val: false
+      weight: 0.4000
       train_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/train.jsonl"
       val_manifest: "/root/nas/usbdata/D0_huamn_dataset/EgoVerse/motus_pretrain/manifests/val.jsonl"
       action_mode: "zeros"
@@ -62,6 +61,16 @@ dataset:
       common:
         global_downsample_rate: 8
         video_action_freq_ratio: 2
+
+    - name: "image_qa"
+      type: "image_qa"
+      weight: 0.1000
+      json_path: "/root/nas/xicheng/d0_handoff_imageqa/json/imageqa_train_no8_10pct.json"
+      image_root: "/root/nas/qa_data/processed_qwen_vl"
+      max_samples: null
+      max_length: 280
+      shuffle: true
+      seed: 42
 
     - name: "droid_pt_v5"
       type: "droid"
@@ -132,8 +141,8 @@ model:
     precision: "bfloat16"
 
   vlm:
-    # checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
-    checkpoint_path: "/root/nas/xicheng/qwen3vl_2b_repro/outputs/qwen3vl2b_full_40pct_8gpu_nframes16/checkpoint-74056"
+    checkpoint_path: "./pretrained_models/Qwen3-VL-2B-Instruct"
+    # checkpoint_path: "/root/nas/xicheng/qwen3vl_2b_repro/outputs/qwen3vl2b_full_40pct_8gpu_nframes16/checkpoint-74056"
     precision: "bfloat16"
     frozen: false
 
@@ -173,7 +182,7 @@ model:
 
 # Training configuration
 training:
-  batch_size: 5
+  batch_size: 3
   max_steps: 400000
   learning_rate: 5.0e-5
   weight_decay: 0.01
@@ -206,7 +215,7 @@ logging:
 
 # Resume training settings
 resume:
-  checkpoint_path: null
+  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v1/multidataset_lap_v1_lap_hypertrain/checkpoint_step_250000
   reset_scheduler: false
 
 # Finetune settings

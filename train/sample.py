@@ -44,24 +44,26 @@ def create_video_grid(predicted_frames: torch.Tensor, ground_truth_frames: torch
     pred_np = np.clip(pred_np, 0, 1)
     gt_np = np.clip(gt_np, 0, 1)
     
-    # Create grid: rows are samples, columns are [GT_frame1, GT_frame2, ..., GT_frameN, Pred_frame1, Pred_frame2, ..., Pred_frameN]
-    fig, axes = plt.subplots(batch_size, num_frames * 2, figsize=(4 * num_frames * 2, 4 * batch_size))
-    if batch_size == 1:
-        axes = axes.reshape(1, -1)
-    elif num_frames * 2 == 1:
+    # Create grid: each sample uses two rows, GT above Pred with frames aligned by column.
+    num_rows = batch_size * 2
+    fig, axes = plt.subplots(num_rows, num_frames, figsize=(4 * num_frames, 4 * num_rows))
+    if num_frames == 1:
         axes = axes.reshape(-1, 1)
     
     for i in range(batch_size):
         for t in range(num_frames):
+            gt_row = i * 2
+            pred_row = gt_row + 1
+
             # Ground truth frame
-            axes[i, t].imshow(gt_np[i, t])
-            axes[i, t].set_title(f'GT Frame {t+1}')
-            axes[i, t].axis('off')
+            axes[gt_row, t].imshow(gt_np[i, t])
+            axes[gt_row, t].set_title(f'Sample {i+1} GT Frame {t+1}')
+            axes[gt_row, t].axis('off')
             
             # Predicted frame  
-            axes[i, t + num_frames].imshow(pred_np[i, t])
-            axes[i, t + num_frames].set_title(f'Pred Frame {t+1}')
-            axes[i, t + num_frames].axis('off')
+            axes[pred_row, t].imshow(pred_np[i, t])
+            axes[pred_row, t].set_title(f'Sample {i+1} Pred Frame {t+1}')
+            axes[pred_row, t].axis('off')
     
     plt.tight_layout()
     

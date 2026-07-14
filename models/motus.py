@@ -78,6 +78,7 @@ class MotusConfig:
 
     # Flow source. "gaussian" preserves the original behavior.
     flow_source_mode: str = "gaussian"
+    flow_source_video_mode: str = "gaussian"
     flow_source_action_noise_std: float = 0.0
 
     # Control whether to load pretrained WAN/VLM backbones.
@@ -91,6 +92,11 @@ class MotusConfig:
         if self.flow_source_mode not in {"gaussian", "history"}:
             raise ValueError(
                 f"flow_source_mode must be 'gaussian' or 'history', got {self.flow_source_mode}"
+            )
+        if self.flow_source_video_mode not in {"gaussian", "history"}:
+            raise ValueError(
+                "flow_source_video_mode must be 'gaussian' or 'history', "
+                f"got {self.flow_source_video_mode}"
             )
         if self.flow_source_action_noise_std < 0:
             raise ValueError("flow_source_action_noise_std must be non-negative")
@@ -856,6 +862,7 @@ class Motus(nn.Module):
         language_embeddings: Optional[List[torch.Tensor]] = None,  # Pre-encoded T5 embeddings for WAN
         vlm_inputs: Optional[List] = None,  # Complete VLM inputs from dataset  
         action_mask: Optional[torch.Tensor] = None,  # [B, chunk_size, action_dim] valid action dims
+        video_mask: Optional[torch.Tensor] = None,  # [B] valid video samples for video loss
         return_dict: bool = True,
         train_lap: bool = False,
         history_actions: torch.Tensor = None,  # [B, chunk_size, action_dim] - historical qpos
@@ -872,6 +879,7 @@ class Motus(nn.Module):
             actions: Target action sequence
             language_embeddings: Pre-encoded T5 embeddings for WAN model
             action_mask: Optional mask for padded action dimensions
+            video_mask: Optional mask for samples with real video supervision
             return_dict: Whether to return detailed outputs
             
         Returns:
@@ -1010,7 +1018,19 @@ class Motus(nn.Module):
             # Video loss (mask the first frame)
             video_pred_masked = video_pred.clone()
             video_pred_masked[:, :, 0:1] = 0
-            video_loss = torch.nn.functional.mse_loss(video_pred_masked, video_target, reduction='mean')
+            if video_mask is not None:
+                video_loss_mask = video_mask.to(device=video_pred.device, dtype=video_pred.dtype).reshape(-1)
+                if video_loss_mask.numel() == 1 and B > 1:
+                    video_loss_mask = video_loss_mask.expand(B)
+                elif video_loss_mask.numel() != B:
+                    raise ValueError(
+                        f"video_mask shape {tuple(video_mask.shape)} must match batch size {B}"
+                    )
+                video_loss_raw = torch.nn.functional.mse_loss(video_pred_masked, video_target, reduction='none')
+                video_loss_per_sample = video_loss_raw.reshape(B, -1).mean(dim=1)
+                video_loss = (video_loss_per_sample * video_loss_mask).sum() / video_loss_mask.sum().clamp(min=1.0)
+            else:
+                video_loss = torch.nn.functional.mse_loss(video_pred_masked, video_target, reduction='mean')
         
             # Action loss
             if action_mask_float is not None:

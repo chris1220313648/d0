@@ -30,12 +30,27 @@ class FractalDataset(data.Dataset):
       <dataset_dir>/
         train|test/
           <task_name>/
-            videos/*.mp4
-            qpos/*.pt
-            epos/*.pt
-            umt5_wan/*.pt
-            instructions/*.txt
-            language_action/*.txt  (optional)
+            videos/
+              <episode_id>.mp4
+              ...
+            qpos/
+              <episode_id>.pt
+              ...
+            epos/
+              <episode_id>.pt
+              ...
+            umt5_wan/
+              <episode_id>.pt
+              ...
+            instructions/
+              <episode_id>.txt
+              ...
+            language_action/
+              <episode_id>.txt  # required only when use_language_action=True
+
+    Episode files are matched by basename. For example, episode "42" uses
+    videos/42.mp4, qpos/42.pt, epos/42.pt, umt5_wan/42.pt,
+    instructions/42.txt, and optionally language_action/42.txt.
     """
 
     def __init__(

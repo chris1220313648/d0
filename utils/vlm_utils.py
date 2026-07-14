@@ -189,3 +189,59 @@ def preprocess_vlm_messages_lap(
     # print("full_inputs.answer_start", full_inputs["answer_start"])
     # print("prompt_inputs.answer_start", prompt_inputs["answer_start"])
     return full_inputs
+
+
+def preprocess_vlm_messages_sft(
+    question: str,
+    answer: str,
+    image_pils,
+    processor,
+    max_length: int | None = None,
+):
+    """Build supervised Qwen-VL inputs for image/text SFT.
+
+    User image(s) and question are prompt tokens. Only assistant answer tokens
+    receive CE labels.
+    """
+    images = list(image_pils if isinstance(image_pils, (list, tuple)) else [image_pils])
+    if not images:
+        raise ValueError("preprocess_vlm_messages_sft requires at least one image")
+
+    clean_question = (question or "").replace("<image>", "").strip()
+    clean_answer = (answer or "").strip()
+    if not clean_question:
+        raise ValueError("empty SFT question")
+    if not clean_answer:
+        raise ValueError("empty SFT answer")
+
+    user_content = [{"type": "image", "image": image} for image in images]
+    user_content.append({"type": "text", "text": clean_question})
+    user_msg = {"role": "user", "content": user_content}
+    assistant_msg = {"role": "assistant", "content": [{"type": "text", "text": clean_answer}]}
+
+    full_messages = [user_msg, assistant_msg]
+    prompt_messages = [user_msg]
+    full_text = processor.apply_chat_template(full_messages, tokenize=False, add_generation_prompt=False)
+    prompt_text = processor.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(prompt_messages)
+
+    processor_kwargs = {
+        "images": image_inputs,
+        "videos": video_inputs,
+        "padding": True,
+        "return_tensors": "pt",
+    }
+    if max_length is not None and int(max_length) > 0:
+        processor_kwargs["max_length"] = int(max_length)
+        processor_kwargs["truncation"] = True
+
+    full_inputs = processor(text=[full_text], **processor_kwargs)
+    prompt_inputs = processor(text=[prompt_text], **processor_kwargs)
+
+    prompt_len = prompt_inputs["input_ids"].shape[1]
+    labels = full_inputs["input_ids"].clone()
+    labels[:, :prompt_len] = -100
+    labels[full_inputs["attention_mask"] == 0] = -100
+    full_inputs["labels"] = labels
+    full_inputs["answer_start"] = torch.tensor([prompt_len], dtype=torch.long)
+    return full_inputs

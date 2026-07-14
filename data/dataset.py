@@ -116,13 +116,19 @@ def _create_multi_dataset(config: OmegaConf, val: bool = False) -> MultiDataset:
     names = []
     weights = []
     for i, child_dataset_config in enumerate(config.dataset.datasets):
+        child_name = child_dataset_config.get('name', child_dataset_config.get('type', f'dataset_{i}'))
+        if val and not bool(child_dataset_config.get('use_for_val', True)):
+            continue
+
         child_config = _build_child_config(config, child_dataset_config)
-        child_name = child_dataset_config.get('name', child_config.dataset.get('type', f'dataset_{i}'))
         child_weight = float(child_dataset_config.get('weight', 1.0))
 
         datasets.append(_create_single_dataset(child_config, val=val))
         names.append(str(child_name))
         weights.append(child_weight)
+
+    if not datasets:
+        raise ValueError("dataset.type='multi' produced no validation datasets; check use_for_val flags")
 
     return MultiDataset(
         datasets=datasets,
@@ -140,6 +146,7 @@ def _build_child_config(config: OmegaConf, child_dataset_config: OmegaConf) -> O
     child_common = child_dataset_dict.pop('common', None)
     child_dataset_dict.pop('name', None)
     child_dataset_dict.pop('weight', None)
+    child_dataset_dict.pop('use_for_val', None)
 
     child_config.dataset = OmegaConf.create(child_dataset_dict)
     if child_common:
@@ -455,6 +462,44 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
 
         return LeRobotAgiBotDataset(**params)
 
+    elif dataset_type == 'lerobot_robocoin':
+        from .lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+
+        params['val'] = val
+
+        return LeRobotRoboCOINDataset(**params)
+
     elif dataset_type == 'bridge':
         from .bridge.bridge_dataset import BridgeDataset
 
@@ -628,9 +673,45 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         params['val'] = val
 
         return DroidDataset(**params)
+
+    elif dataset_type == 'image_qa':
+        from .image_qa import ImageQADataset
+
+        params = {}
+        if hasattr(config, 'common'):
+            params.update({
+                'num_video_frames': config.common.num_video_frames,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'action_dim': config.common.action_dim,
+                'state_dim': config.common.state_dim,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+        if hasattr(config.dataset, 'json_path'):
+            params['json_path'] = config.dataset.json_path
+        if hasattr(config.dataset, 'image_root'):
+            params['image_root'] = config.dataset.image_root
+        if hasattr(config.dataset, 'max_samples'):
+            params['max_samples'] = config.dataset.max_samples
+        if hasattr(config.dataset, 'max_length'):
+            params['max_length'] = config.dataset.max_length
+        if hasattr(config.dataset, 'seed'):
+            params['seed'] = config.dataset.seed
+        if hasattr(config.dataset, 'shuffle'):
+            params['shuffle'] = bool(config.dataset.shuffle) and not val
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+        if hasattr(config.dataset, 'params'):
+            params.update(OmegaConf.to_object(config.dataset.params))
+
+        params['val'] = val
+        required = ['json_path', 'image_root', 'vlm_checkpoint_path']
+        missing = [key for key in required if key not in params or params[key] in (None, '')]
+        if missing:
+            raise ValueError(f"dataset.type='image_qa' missing required params: {missing}")
+        return ImageQADataset(**params)
     
     else:
-        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, lerobot_agibot, latent_action, egoverse_trimodal")
+        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, lerobot_agibot, lerobot_robocoin, latent_action, egoverse_trimodal, image_qa")
 
 
 def _process_vlm_inputs_batch(vlm_inputs: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
@@ -790,6 +871,19 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
     )
     has_action_mask = all(('action_mask' in sample and sample['action_mask'] is not None) for sample in batch)
     action_masks = torch.stack([sample['action_mask'] for sample in batch]) if has_action_mask else None
+    has_video_mask = any(('video_mask' in sample and sample['video_mask'] is not None) for sample in batch)
+    video_masks = None
+    if has_video_mask:
+        video_mask_values = []
+        for sample in batch:
+            value = sample.get('video_mask')
+            if value is None:
+                video_mask_values.append(torch.tensor(True, dtype=torch.bool))
+            elif torch.is_tensor(value):
+                video_mask_values.append(value.to(dtype=torch.bool).reshape(-1)[0].cpu())
+            else:
+                video_mask_values.append(torch.tensor(bool(value), dtype=torch.bool))
+        video_masks = torch.stack(video_mask_values)
     has_initial_state = all(('initial_state' in sample and sample['initial_state'] is not None) for sample in batch)
     initial_states = torch.stack([sample['initial_state'] for sample in batch]) if has_initial_state else None
     dataset_names = [sample.get('dataset_name') for sample in batch]
@@ -820,6 +914,8 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
 
     if action_masks is not None:
         result['action_mask'] = action_masks
+    if video_masks is not None:
+        result['video_mask'] = video_masks
     if history_action_sequences is not None:
         result['history_action_sequence'] = history_action_sequences
     if initial_states is not None:
