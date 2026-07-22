@@ -110,6 +110,12 @@ def load_config(config_path: str) -> OmegaConf:
         raise ValueError(
             f"model.flow_source.mode must be 'gaussian' or 'history', got {flow_source_mode}"
         )
+    flow_source_video_mode = flow_source.get('video_mode', flow_source_mode)
+    if flow_source_video_mode not in {'gaussian', 'history'}:
+        raise ValueError(
+            "model.flow_source.video_mode must be 'gaussian' or 'history', "
+            f"got {flow_source_video_mode}"
+        )
     if flow_source_mode == 'history':
         history_length = int(
             flow_source.get('history_length', config.common.action_chunk_size)
@@ -118,6 +124,27 @@ def load_config(config_path: str) -> OmegaConf:
             raise ValueError(
                 "model.flow_source.history_length must match action_chunk_size "
                 f"({config.common.action_chunk_size}), got {history_length}"
+            )
+
+    future_video_noise_aug = config.model.get('future_video_noise_augmentation', {})
+    if future_video_noise_aug:
+        probability = float(future_video_noise_aug.get('probability', 0.5))
+        min_scale = float(future_video_noise_aug.get('min_scale', 0.5))
+        max_scale = float(future_video_noise_aug.get('max_scale', 1.0))
+        future_start_index = int(future_video_noise_aug.get('future_start_index', 1))
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                f"model.future_video_noise_augmentation.probability must be in [0, 1], got {probability}"
+            )
+        if not 0.0 <= min_scale <= max_scale <= 1.0:
+            raise ValueError(
+                "model.future_video_noise_augmentation scale range must satisfy "
+                f"0 <= min_scale <= max_scale <= 1, got {min_scale}, {max_scale}"
+            )
+        if future_start_index < 1:
+            raise ValueError(
+                "model.future_video_noise_augmentation.future_start_index must be >= 1 "
+                "so the condition frame is not augmented"
             )
     
     # Validate dataset configuration
@@ -228,6 +255,7 @@ class UniDiffuserTrainer:
                 "und_expert": model.get("und_expert", {}),
                 "time_distribution": model.get("time_distribution", {}),
                 "flow_source": model.get("flow_source", {"mode": "gaussian"}),
+                "future_video_noise_augmentation": model.get("future_video_noise_augmentation", {}),
                 "ema": model.get("ema", {}),
             }
             import json as _json
@@ -552,8 +580,27 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         video_loss_weight=config.model.loss_weights.video_loss_weight,
         action_loss_weight=config.model.loss_weights.action_loss_weight,
         flow_source_mode=config.model.get('flow_source', {}).get('mode', 'gaussian'),
+        flow_source_video_mode=config.model.get('flow_source', {}).get(
+            'video_mode',
+            config.model.get('flow_source', {}).get('mode', 'gaussian'),
+        ),
         flow_source_action_noise_std=float(
             config.model.get('flow_source', {}).get('action_noise_std', 0.0)
+        ),
+        future_video_noise_aug_enabled=bool(
+            config.model.get('future_video_noise_augmentation', {}).get('enabled', False)
+        ),
+        future_video_noise_aug_probability=float(
+            config.model.get('future_video_noise_augmentation', {}).get('probability', 0.5)
+        ),
+        future_video_noise_aug_min_scale=float(
+            config.model.get('future_video_noise_augmentation', {}).get('min_scale', 0.5)
+        ),
+        future_video_noise_aug_max_scale=float(
+            config.model.get('future_video_noise_augmentation', {}).get('max_scale', 1.0)
+        ),
+        future_video_noise_aug_start_index=int(
+            config.model.get('future_video_noise_augmentation', {}).get('future_start_index', 1)
         ),
         training_mode=getattr(config, 'training_mode', 'finetune'),
         load_pretrained_backbones=getattr(config.model, 'load_pretrained_backbones', None),

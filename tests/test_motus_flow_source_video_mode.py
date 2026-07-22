@@ -3,9 +3,10 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ROOT_MOTUS_CONFIG_PATH = REPO_ROOT / "models" / "motus.py"
 MOTUS_CONFIG_PATHS = [
     REPO_ROOT / "RoboTwin" / "policy" / "Motus" / "models" / "motus.py",
-    REPO_ROOT / "models" / "motus.py",
+    ROOT_MOTUS_CONFIG_PATH,
 ]
 
 
@@ -28,11 +29,13 @@ def _field_defaults(config_class: ast.ClassDef) -> dict[str, object]:
     return defaults
 
 
-def test_motus_config_accepts_flow_source_video_mode_with_gaussian_default():
-    for path in MOTUS_CONFIG_PATHS:
-        defaults = _field_defaults(_motus_config_class(path))
+def test_root_motus_config_inherits_action_flow_source_when_video_mode_is_omitted():
+    defaults = _field_defaults(_motus_config_class(ROOT_MOTUS_CONFIG_PATH))
+    source = ROOT_MOTUS_CONFIG_PATH.read_text()
 
-        assert defaults["flow_source_video_mode"] == "gaussian", path
+    assert defaults["flow_source_video_mode"] is None
+    assert "if self.flow_source_video_mode is None:" in source
+    assert "self.flow_source_video_mode = self.flow_source_mode" in source
 
 
 def test_motus_config_validates_flow_source_video_mode():
