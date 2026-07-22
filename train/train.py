@@ -125,6 +125,27 @@ def load_config(config_path: str) -> OmegaConf:
                 "model.flow_source.history_length must match action_chunk_size "
                 f"({config.common.action_chunk_size}), got {history_length}"
             )
+
+    future_video_noise_aug = config.model.get('future_video_noise_augmentation', {})
+    if future_video_noise_aug:
+        probability = float(future_video_noise_aug.get('probability', 0.5))
+        min_scale = float(future_video_noise_aug.get('min_scale', 0.5))
+        max_scale = float(future_video_noise_aug.get('max_scale', 1.0))
+        future_start_index = int(future_video_noise_aug.get('future_start_index', 1))
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                f"model.future_video_noise_augmentation.probability must be in [0, 1], got {probability}"
+            )
+        if not 0.0 <= min_scale <= max_scale <= 1.0:
+            raise ValueError(
+                "model.future_video_noise_augmentation scale range must satisfy "
+                f"0 <= min_scale <= max_scale <= 1, got {min_scale}, {max_scale}"
+            )
+        if future_start_index < 1:
+            raise ValueError(
+                "model.future_video_noise_augmentation.future_start_index must be >= 1 "
+                "so the condition frame is not augmented"
+            )
     
     # Validate dataset configuration
     dataset_config = {
@@ -232,6 +253,7 @@ class UniDiffuserTrainer:
                 "und_expert": model.get("und_expert", {}),
                 "time_distribution": model.get("time_distribution", {}),
                 "flow_source": model.get("flow_source", {"mode": "gaussian"}),
+                "future_video_noise_augmentation": model.get("future_video_noise_augmentation", {}),
                 "ema": model.get("ema", {}),
             }
             import json as _json
@@ -555,6 +577,21 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         ),
         flow_source_action_noise_std=float(
             config.model.get('flow_source', {}).get('action_noise_std', 0.0)
+        ),
+        future_video_noise_aug_enabled=bool(
+            config.model.get('future_video_noise_augmentation', {}).get('enabled', False)
+        ),
+        future_video_noise_aug_probability=float(
+            config.model.get('future_video_noise_augmentation', {}).get('probability', 0.5)
+        ),
+        future_video_noise_aug_min_scale=float(
+            config.model.get('future_video_noise_augmentation', {}).get('min_scale', 0.5)
+        ),
+        future_video_noise_aug_max_scale=float(
+            config.model.get('future_video_noise_augmentation', {}).get('max_scale', 1.0)
+        ),
+        future_video_noise_aug_start_index=int(
+            config.model.get('future_video_noise_augmentation', {}).get('future_start_index', 1)
         ),
         training_mode=getattr(config, 'training_mode', 'finetune'),
         load_pretrained_backbones=getattr(config.model, 'load_pretrained_backbones', None),

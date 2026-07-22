@@ -173,6 +173,7 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+auth.json
 .venv
 env/
 venv/

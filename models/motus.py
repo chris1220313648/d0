@@ -21,6 +21,7 @@ from transformers import Qwen3VLForConditionalGeneration, AutoConfig
 from .wan_model import WanVideoModel
 from .action_expert import ActionExpert, ActionExpertConfig
 from .und_expert import UndExpert, UndExpertConfig
+from utils.video_noise_augmentation import apply_future_frame_noise_augmentation
 # Add Flow-Matching schedulers
 from wan.utils.fm import FlowMatchScheduler
 from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
@@ -82,6 +83,14 @@ class MotusConfig:
     flow_source_video_mode: Optional[str] = None
     flow_source_action_noise_std: float = 0.0
 
+    # Training-only LingBot-style augmentation for future video latent frames:
+    # z_aug = (1 - s_aug) * eps + s_aug * z, with s_aug in [min, max].
+    future_video_noise_aug_enabled: bool = False
+    future_video_noise_aug_probability: float = 0.5
+    future_video_noise_aug_min_scale: float = 0.5
+    future_video_noise_aug_max_scale: float = 1.0
+    future_video_noise_aug_start_index: int = 1
+
     # Control whether to load pretrained WAN/VLM backbones.
     # None = default behavior (load), False = skip loading (init from config only)
     load_pretrained_backbones: Optional[bool] = None
@@ -103,6 +112,17 @@ class MotusConfig:
             )
         if self.flow_source_action_noise_std < 0:
             raise ValueError("flow_source_action_noise_std must be non-negative")
+        if not 0.0 <= self.future_video_noise_aug_probability <= 1.0:
+            raise ValueError("future_video_noise_aug_probability must be in [0, 1]")
+        if not 0.0 <= self.future_video_noise_aug_min_scale <= self.future_video_noise_aug_max_scale <= 1.0:
+            raise ValueError(
+                "future_video_noise_aug scale range must satisfy "
+                "0 <= min_scale <= max_scale <= 1"
+            )
+        if self.future_video_noise_aug_start_index < 1:
+            raise ValueError(
+                "future_video_noise_aug_start_index must be >= 1 so the condition frame is not augmented"
+            )
 
         # Action chunk size is determined by global downsample rate and frequency ratio
         self.action_chunk_size = self.num_video_frames * self.video_action_freq_ratio
@@ -914,6 +934,14 @@ class Motus(nn.Module):
         noisy_video_latent = clean_full_latent * (1 - sigma) + video_source * sigma
         # Teacher Forcing on the first frame
         noisy_video_latent[:, :, 0:1] = condition_frame_latent
+        noisy_video_latent, video_noise_aug_info = apply_future_frame_noise_augmentation(
+            noisy_video_latent,
+            enabled=self.config.future_video_noise_aug_enabled,
+            probability=self.config.future_video_noise_aug_probability,
+            min_scale=self.config.future_video_noise_aug_min_scale,
+            max_scale=self.config.future_video_noise_aug_max_scale,
+            future_start_index=self.config.future_video_noise_aug_start_index,
+        )
         # Flow-Matching target: source - clean
         video_target = video_source - clean_full_latent
         video_target[:, :, 0:1] = 0
@@ -1045,6 +1073,8 @@ class Motus(nn.Module):
                 'llm_loss': llm_loss,
                 'video_timestep_mean': sigma.float().mean().item(),
                 'action_timestep_mean': sigma_action.float().mean().item(),
+                'future_video_noise_aug_rate': video_noise_aug_info['applied'].float().mean().item(),
+                'future_video_noise_aug_scale_mean': video_noise_aug_info['scales'].float().mean().item(),
             }
 
     def inference_step(

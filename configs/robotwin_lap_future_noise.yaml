@@ -86,7 +86,20 @@ model:
   # Inference settings
   inference:
     num_inference_timesteps: 10               # Number of denoising steps during inference
-    
+
+  # Training-only video latent noise augmentation for LAP/action decoding.
+  # Only future latent frames are augmented; the first condition frame stays clean.
+  future_video_noise_augmentation:
+    enabled: true
+    probability: 0.5
+    min_scale: 0.5
+    max_scale: 1.0
+    future_start_index: 1
+  flow_source:
+    mode: "history"
+    video_mode: "gaussian"
+    action_noise_std: 0.02
+    history_length: 16
   # Loss weights
   loss_weights:
     video_loss_weight: 1.0       # Weight for video reconstruction loss
@@ -104,7 +117,7 @@ model:
 # Training configuration
 training:
   # Optimization settings
-  batch_size: 6
+  batch_size: 5
   # batch_size: 8
   # max_steps: 1000000
   max_steps: 200000
