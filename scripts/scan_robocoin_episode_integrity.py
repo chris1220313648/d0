@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import json
+import time
 import traceback as traceback_module
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
+import av
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -79,6 +81,16 @@ class ParquetMeasurement:
     timestamp_max: float | None
     frame_index_min: int | None
     frame_index_max: int | None
+
+
+@dataclass(frozen=True)
+class VideoMeasurement:
+    key: str
+    path: str
+    decoded_frames: int
+    fps: float | None
+    timestamp_min: float | None
+    timestamp_max: float | None
 
 
 def resolve_episode_path(
@@ -483,3 +495,171 @@ def validate_auxiliary(spec: EpisodeSpec) -> list[Issue]:
             except Exception as exc:
                 issues.append(_issue("invalid_t5_embedding", str(exc), path))
     return issues
+
+
+def _decode_video_with_timestamps(
+    path: Path,
+    key: str,
+) -> tuple[VideoMeasurement, list[float]]:
+    timestamps: list[float] = []
+    with av.open(str(path)) as container:
+        if len(container.streams.video) != 1:
+            raise ValueError(
+                f"expected exactly one video stream, got {len(container.streams.video)}"
+            )
+        stream = container.streams.video[0]
+        average_rate = float(stream.average_rate) if stream.average_rate else None
+        for frame in container.decode(stream):
+            if frame.time is not None:
+                timestamp = float(frame.time)
+            elif frame.pts is not None and stream.time_base is not None:
+                timestamp = float(frame.pts * stream.time_base)
+            else:
+                raise ValueError("decoded frame has no timestamp")
+            timestamps.append(timestamp)
+
+    if not timestamps:
+        raise ValueError("video decoded zero frames")
+    timestamp_array = np.asarray(timestamps, dtype=np.float64)
+    if not np.isfinite(timestamp_array).all() or np.any(np.diff(timestamp_array) < 0):
+        raise ValueError("decoded timestamps must be finite and monotonic")
+    measured_fps = average_rate
+    if measured_fps is None and len(timestamp_array) > 1:
+        positive_deltas = np.diff(timestamp_array)
+        positive_deltas = positive_deltas[positive_deltas > 0]
+        if len(positive_deltas):
+            measured_fps = float(1.0 / np.median(positive_deltas))
+    return (
+        VideoMeasurement(
+            key=key,
+            path=str(path),
+            decoded_frames=len(timestamps),
+            fps=measured_fps,
+            timestamp_min=float(timestamp_array[0]),
+            timestamp_max=float(timestamp_array[-1]),
+        ),
+        timestamps,
+    )
+
+
+def decode_video(path: Path) -> VideoMeasurement:
+    """Decode a video stream to EOF and return compact measurements."""
+    measurement, _ = _decode_video_with_timestamps(path, "")
+    return measurement
+
+
+def _timestamps_are_covered(
+    decoded: Sequence[float],
+    queries: Sequence[float],
+    tolerance_s: float,
+) -> bool:
+    decoded_array = np.asarray(decoded, dtype=np.float64)
+    for query in queries:
+        position = int(np.searchsorted(decoded_array, query))
+        candidates: list[float] = []
+        if position < len(decoded_array):
+            candidates.append(abs(float(decoded_array[position]) - float(query)))
+        if position > 0:
+            candidates.append(abs(float(decoded_array[position - 1]) - float(query)))
+        if not candidates or min(candidates) > tolerance_s:
+            return False
+    return True
+
+
+def validate_videos(
+    spec: EpisodeSpec,
+    parquet: ParquetMeasurement,
+    query_timestamps: Sequence[float],
+) -> tuple[list[VideoMeasurement], list[Issue]]:
+    """Fully decode every declared stream and validate timestamp coverage."""
+    measurements: list[VideoMeasurement] = []
+    issues: list[Issue] = []
+    for key, raw_path in spec.videos:
+        path = Path(raw_path)
+        if not path.is_file():
+            issues.append(_issue("missing_video", f"missing video for {key}", path))
+            continue
+        try:
+            measurement, decoded_timestamps = _decode_video_with_timestamps(path, key)
+        except Exception as exc:
+            issues.append(_issue("video_decode_error", f"{key}: {exc}", path))
+            continue
+        measurements.append(measurement)
+        if measurement.decoded_frames != parquet.rows:
+            issues.append(
+                _issue(
+                    "video_frame_count_mismatch",
+                    f"{key}: decoded={measurement.decoded_frames}, parquet={parquet.rows}",
+                    path,
+                )
+            )
+        if (
+            measurement.fps is not None
+            and abs(measurement.fps - spec.fps) > max(0.01, spec.fps * 0.01)
+        ):
+            issues.append(
+                _issue(
+                    "video_fps_mismatch",
+                    f"{key}: decoded={measurement.fps}, metadata={spec.fps}",
+                    path,
+                )
+            )
+        if query_timestamps:
+            query_max = max(query_timestamps)
+            decoded_max = measurement.timestamp_max
+            if decoded_max is None or query_max > decoded_max + spec.tolerance_s:
+                issues.append(
+                    _issue(
+                        "video_too_short",
+                        f"{key}: query_max={query_max}, decoded_max={decoded_max}",
+                        path,
+                    )
+                )
+            if not _timestamps_are_covered(
+                decoded_timestamps,
+                query_timestamps,
+                spec.tolerance_s,
+            ):
+                issues.append(
+                    _issue(
+                        "video_timestamp_mismatch",
+                        f"{key}: decoded timestamps do not cover parquet timestamps",
+                        path,
+                    )
+                )
+    return measurements, issues
+
+
+def scan_episode(spec: EpisodeSpec) -> EpisodeResult:
+    """Run all deterministic checks for one episode without raising."""
+    started = time.monotonic()
+    issues: list[Issue] = []
+    measurements: list[VideoMeasurement] = []
+    parquet_dict: dict[str, object] | None = None
+    unexpected_traceback = None
+    try:
+        issues.extend(validate_auxiliary(spec))
+        parquet, timestamps, parquet_issues = validate_parquet(spec)
+        issues.extend(parquet_issues)
+        if parquet is not None:
+            parquet_dict = asdict(parquet)
+            if timestamps:
+                measurements, video_issues = validate_videos(
+                    spec,
+                    parquet,
+                    timestamps,
+                )
+                issues.extend(video_issues)
+    except Exception as exc:
+        unexpected_traceback = traceback_module.format_exc()
+        issues.append(_issue("unexpected_error", str(exc)))
+    return EpisodeResult(
+        task=spec.task,
+        episode_index=spec.episode_index,
+        status="good" if not issues else "bad",
+        elapsed_s=time.monotonic() - started,
+        parquet=parquet_dict,
+        videos=tuple(asdict(measurement) for measurement in measurements),
+        issues=tuple(issues),
+        traceback=unexpected_traceback,
+    )

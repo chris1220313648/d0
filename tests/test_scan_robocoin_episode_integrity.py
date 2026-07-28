@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import av
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -98,6 +99,33 @@ def _write_parquet(
         }
     pq.write_table(pa.table(columns), parquet_path)
     return parquet_path
+
+
+def _write_video(path: Path, frame_count: int, fps: int = 30) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with av.open(str(path), mode="w") as container:
+        stream = container.add_stream("libx264", rate=fps)
+        stream.width = 16
+        stream.height = 16
+        stream.pix_fmt = "yuv420p"
+        for index in range(frame_count):
+            image = np.full((16, 16, 3), index, dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    return path
+
+
+def _default_video_path(task_root: Path, episode_index: int = 0) -> Path:
+    return (
+        task_root
+        / "videos"
+        / f"chunk-{episode_index // 1000:03d}"
+        / "observation.images.cam_high_rgb"
+        / f"episode_{episode_index:06d}.mp4"
+    )
 
 
 def _discover_one(root: Path):
@@ -317,3 +345,85 @@ def test_validate_auxiliary_rejects_empty_present_language_action(tmp_path):
     assert [issue.code for issue in scanner.validate_auxiliary(spec)] == [
         "invalid_language_action"
     ]
+
+
+def test_scan_episode_fully_decodes_valid_video(tmp_path):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    _write_parquet(task_root)
+    _write_video(_default_video_path(task_root), frame_count=4)
+    scanner, spec = _discover_one(tmp_path)
+
+    result = scanner.scan_episode(spec)
+
+    assert result.status == "good"
+    assert result.issues == ()
+    assert result.videos[0]["decoded_frames"] == 4
+    assert result.videos[0]["timestamp_max"] >= 3 / 30 - spec.tolerance_s
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_codes"),
+    [
+        ("missing", {"missing_video"}),
+        ("corrupt", {"video_decode_error"}),
+        (
+            "short",
+            {"video_frame_count_mismatch", "video_too_short"},
+        ),
+        ("wrong_fps", {"video_fps_mismatch"}),
+    ],
+)
+def test_scan_episode_reports_video_failures(tmp_path, mode, expected_codes):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    _write_parquet(task_root)
+    video_path = _default_video_path(task_root)
+    if mode == "corrupt":
+        video_path.parent.mkdir(parents=True)
+        video_path.write_bytes(b"not video")
+    elif mode == "short":
+        _write_video(video_path, frame_count=3)
+    elif mode == "wrong_fps":
+        _write_video(video_path, frame_count=4, fps=15)
+    scanner, spec = _discover_one(tmp_path)
+
+    result = scanner.scan_episode(spec)
+
+    assert result.status == "bad"
+    assert {issue.code for issue in result.issues} >= expected_codes
+
+
+def test_scan_episode_decodes_every_declared_video_key(tmp_path):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    info_path = task_root / "meta/info.json"
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    info["features"]["observation.images.cam_left_wrist_rgb"] = {"dtype": "video"}
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    _write_parquet(task_root)
+    _write_video(_default_video_path(task_root), frame_count=4)
+    _write_video(
+        task_root
+        / "videos/chunk-000/observation.images.cam_left_wrist_rgb/"
+        "episode_000000.mp4",
+        frame_count=4,
+    )
+    scanner, spec = _discover_one(tmp_path)
+
+    result = scanner.scan_episode(spec)
+
+    assert result.status == "good"
+    assert {video["key"] for video in result.videos} == {
+        "observation.images.cam_high_rgb",
+        "observation.images.cam_left_wrist_rgb",
+    }
