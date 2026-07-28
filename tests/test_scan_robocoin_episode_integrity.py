@@ -2,6 +2,9 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 
@@ -60,6 +63,50 @@ def _make_task(
     )
     _write_jsonl(task_root / "meta" / "episodes.jsonl", episodes)
     return task_root
+
+
+def _write_parquet(
+    task_root: Path,
+    episode_index: int = 0,
+    *,
+    columns: dict | None = None,
+) -> Path:
+    parquet_path = (
+        task_root
+        / "data"
+        / f"chunk-{episode_index // 1000:03d}"
+        / f"episode_{episode_index:06d}.parquet"
+    )
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    if columns is None:
+        columns = {
+            "observation.state": [
+                [0.0, 0.1],
+                [0.2, 0.3],
+                [0.4, 0.5],
+                [0.6, 0.7],
+            ],
+            "action": [
+                [1.0, 1.1],
+                [1.2, 1.3],
+                [1.4, 1.5],
+                [1.6, 1.7],
+            ],
+            "timestamp": [0.0, 1 / 30, 2 / 30, 3 / 30],
+            "frame_index": [0, 1, 2, 3],
+            "episode_index": [episode_index] * 4,
+        }
+    pq.write_table(pa.table(columns), parquet_path)
+    return parquet_path
+
+
+def _discover_one(root: Path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    episodes, failures = scanner.discover_episodes(root, None, None)
+    assert failures == []
+    assert len(episodes) == 1
+    return scanner, episodes[0]
 
 
 def test_discover_episodes_is_sorted_and_resolves_chunks(tmp_path):
@@ -128,3 +175,145 @@ def test_resolve_episode_path_rejects_escape(tmp_path):
             3,
             1000,
         )
+
+
+def test_validate_parquet_accepts_valid_episode_and_maps_canonical55(tmp_path):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    _write_parquet(task_root)
+    scanner, spec = _discover_one(tmp_path)
+
+    measurement, timestamps, issues = scanner.validate_parquet(spec)
+
+    assert issues == []
+    assert measurement is not None
+    assert measurement.rows == 4
+    assert measurement.timestamp_min == 0.0
+    assert measurement.frame_index_max == 3
+    assert timestamps == pytest.approx([0.0, 1 / 30, 2 / 30, 3 / 30])
+
+
+def test_validate_parquet_accumulates_length_frame_and_timestamp_errors(tmp_path):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 5}],
+    )
+    _write_parquet(
+        task_root,
+        columns={
+            "observation.state": [[0.0, 0.1]] * 4,
+            "action": [[1.0, 1.1]] * 4,
+            "timestamp": [0.0, 0.2, 0.1, np.nan],
+            "frame_index": [0, 2, 1, 3],
+            "episode_index": [0] * 4,
+        },
+    )
+    scanner, spec = _discover_one(tmp_path)
+
+    measurement, _, issues = scanner.validate_parquet(spec)
+
+    assert measurement is not None
+    assert {issue.code for issue in issues} >= {
+        "episode_length_mismatch",
+        "invalid_frame_index",
+        "invalid_timestamp",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_code"),
+    [
+        ("missing", "missing_parquet"),
+        ("corrupt", "invalid_parquet"),
+        ("missing_action", "missing_action"),
+        ("wrong_episode", "episode_index_mismatch"),
+    ],
+)
+def test_validate_parquet_reports_structural_failures(
+    tmp_path,
+    mode,
+    expected_code,
+):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    if mode == "corrupt":
+        path = task_root / "data/chunk-000/episode_000000.parquet"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"not parquet")
+    elif mode == "missing_action":
+        _write_parquet(
+            task_root,
+            columns={
+                "observation.state": [[0.0, 0.1]] * 4,
+                "timestamp": [0.0, 1 / 30, 2 / 30, 3 / 30],
+                "frame_index": [0, 1, 2, 3],
+                "episode_index": [0] * 4,
+            },
+        )
+    elif mode == "wrong_episode":
+        _write_parquet(
+            task_root,
+            columns={
+                "observation.state": [[0.0, 0.1]] * 4,
+                "action": [[1.0, 1.1]] * 4,
+                "timestamp": [0.0, 1 / 30, 2 / 30, 3 / 30],
+                "frame_index": [0, 1, 2, 3],
+                "episode_index": [9] * 4,
+            },
+        )
+    scanner, spec = _discover_one(tmp_path)
+
+    _, _, issues = scanner.validate_parquet(spec)
+
+    assert expected_code in {issue.code for issue in issues}
+
+
+def test_validate_auxiliary_accepts_missing_optional_language_action(tmp_path):
+    _make_task(tmp_path, "task", [{"episode_index": 0, "length": 4}])
+    scanner, spec = _discover_one(tmp_path)
+
+    assert scanner.validate_auxiliary(spec) == []
+
+
+def test_validate_auxiliary_rejects_declared_missing_files(tmp_path):
+    _make_task(
+        tmp_path,
+        "task",
+        [
+            {
+                "episode_index": 0,
+                "length": 4,
+                "language_action_path": "language_action/episode_000000.txt",
+                "t5_embedding_path": "t5_embedding/episode_000000.pt",
+            }
+        ],
+    )
+    scanner, spec = _discover_one(tmp_path)
+
+    assert {issue.code for issue in scanner.validate_auxiliary(spec)} == {
+        "missing_declared_language_action",
+        "missing_declared_t5_embedding",
+    }
+
+
+def test_validate_auxiliary_rejects_empty_present_language_action(tmp_path):
+    task_root = _make_task(
+        tmp_path,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    path = task_root / "language_action/episode_000000.txt"
+    path.parent.mkdir()
+    path.write_text("\n", encoding="utf-8")
+    scanner, spec = _discover_one(tmp_path)
+
+    assert [issue.code for issue in scanner.validate_auxiliary(spec)] == [
+        "invalid_language_action"
+    ]

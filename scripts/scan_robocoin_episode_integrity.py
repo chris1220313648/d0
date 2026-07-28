@@ -9,6 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+import torch
+
+from data.canonical55 import map_robocoin_named_vector
+
 
 DEFAULT_ROOT = Path("/root/nas/code/d0/data/robot_data/robocoin")
 DEFAULT_OUTPUT_DIR = Path(
@@ -62,6 +69,16 @@ class EpisodeSpec:
     language_action_declared: bool
     t5_embedding_path: str | None
     t5_embedding_declared: bool
+
+
+@dataclass(frozen=True)
+class ParquetMeasurement:
+    path: str
+    rows: int
+    timestamp_min: float | None
+    timestamp_max: float | None
+    frame_index_min: int | None
+    frame_index_max: int | None
 
 
 def resolve_episode_path(
@@ -238,3 +255,231 @@ def discover_episodes(
                 episodes.append(episode)
     episodes.sort(key=lambda item: (item.task, item.episode_index))
     return episodes, failures
+
+
+def _issue(code: str, message: str, path: Path | str | None = None) -> Issue:
+    return Issue(code=code, message=message, path=str(path) if path is not None else None)
+
+
+def _numeric_matrix(table: pa.Table, key: str) -> np.ndarray:
+    values = table[key].to_pylist()
+    if any(value is None for value in values):
+        raise ValueError(f"{key} contains null rows")
+    array = np.asarray(values, dtype=np.float32)
+    if array.ndim != 2:
+        raise ValueError(f"{key} must be a rank-2 vector column, got {array.shape}")
+    if not np.isfinite(array).all():
+        raise ValueError(f"{key} contains non-finite values")
+    return array
+
+
+def validate_canonical55(spec: EpisodeSpec, table: pa.Table) -> list[Issue]:
+    """Validate the same named RoboCOIN-to-canonical55 mapping used in training."""
+    issues: list[Issue] = []
+    for key, names in (
+        (spec.state_key, spec.state_names),
+        (spec.action_key, spec.action_names),
+    ):
+        if key not in table.column_names:
+            continue
+        try:
+            array = _numeric_matrix(table, key)
+            if len(names) > array.shape[-1]:
+                raise ValueError(
+                    f"{key} has width {array.shape[-1]} but {len(names)} names"
+                )
+            mapped, mask = map_robocoin_named_vector(
+                torch.from_numpy(array),
+                names,
+            )
+            if mapped.shape[-1] != 55 or mask.shape != mapped.shape:
+                raise ValueError(
+                    f"{key} mapping returned mapped={tuple(mapped.shape)}, "
+                    f"mask={tuple(mask.shape)}"
+                )
+            if not bool(mask.any()):
+                raise ValueError(f"{key} names map to no canonical55 slots")
+        except Exception as exc:
+            issues.append(
+                _issue(
+                    "canonical55_mapping_error",
+                    f"{key}: {exc}",
+                    spec.parquet_path,
+                )
+            )
+    return issues
+
+
+def validate_parquet(
+    spec: EpisodeSpec,
+) -> tuple[ParquetMeasurement | None, list[float], list[Issue]]:
+    """Read an episode parquet completely and validate loader-required columns."""
+    path = Path(spec.parquet_path)
+    if not path.is_file():
+        return None, [], [_issue("missing_parquet", "parquet does not exist", path)]
+    try:
+        table = pq.read_table(path)
+    except Exception as exc:
+        return None, [], [_issue("invalid_parquet", str(exc), path)]
+
+    rows = table.num_rows
+    issues: list[Issue] = []
+    if rows == 0:
+        issues.append(_issue("empty_parquet", "parquet has zero rows", path))
+    if rows != spec.declared_length:
+        issues.append(
+            _issue(
+                "episode_length_mismatch",
+                f"declared={spec.declared_length}, parquet={rows}",
+                path,
+            )
+        )
+
+    required_scalar = ("timestamp", "frame_index", "episode_index")
+    for key in required_scalar:
+        if key not in table.column_names:
+            issues.append(_issue("schema_mismatch", f"missing column {key}", path))
+    if spec.action_key not in table.column_names:
+        issues.append(
+            _issue(
+                "missing_action",
+                f"missing action column {spec.action_key}",
+                path,
+            )
+        )
+    if spec.state_key not in table.column_names:
+        issues.append(
+            _issue(
+                "schema_mismatch",
+                f"missing state column {spec.state_key}",
+                path,
+            )
+        )
+
+    timestamps: list[float] = []
+    timestamp_min = None
+    timestamp_max = None
+    if "timestamp" in table.column_names:
+        try:
+            timestamp_array = np.asarray(
+                table["timestamp"].to_pylist(),
+                dtype=np.float64,
+            ).reshape(-1)
+            if (
+                len(timestamp_array) != rows
+                or not np.isfinite(timestamp_array).all()
+                or np.any(np.diff(timestamp_array) < 0)
+            ):
+                raise ValueError("timestamps must be finite and monotonic")
+            timestamps = timestamp_array.tolist()
+            if len(timestamp_array):
+                timestamp_min = float(timestamp_array[0])
+                timestamp_max = float(timestamp_array[-1])
+        except Exception as exc:
+            issues.append(_issue("invalid_timestamp", str(exc), path))
+
+    frame_index_min = None
+    frame_index_max = None
+    if "frame_index" in table.column_names:
+        try:
+            frame_indices = np.asarray(
+                table["frame_index"].to_pylist(),
+                dtype=np.int64,
+            ).reshape(-1)
+            if not np.array_equal(frame_indices, np.arange(rows, dtype=np.int64)):
+                raise ValueError("frame_index must be contiguous from zero")
+            if len(frame_indices):
+                frame_index_min = int(frame_indices[0])
+                frame_index_max = int(frame_indices[-1])
+        except Exception as exc:
+            issues.append(_issue("invalid_frame_index", str(exc), path))
+
+    if "episode_index" in table.column_names:
+        try:
+            episode_indices = np.asarray(
+                table["episode_index"].to_pylist(),
+                dtype=np.int64,
+            ).reshape(-1)
+            if len(episode_indices) != rows or not np.all(
+                episode_indices == spec.episode_index
+            ):
+                raise ValueError(
+                    f"rows do not all belong to episode {spec.episode_index}"
+                )
+        except Exception as exc:
+            issues.append(_issue("episode_index_mismatch", str(exc), path))
+
+    for key, names in (
+        (spec.state_key, spec.state_names),
+        (spec.action_key, spec.action_names),
+    ):
+        if key not in table.column_names:
+            continue
+        try:
+            array = _numeric_matrix(table, key)
+            if array.shape[0] != rows:
+                raise ValueError(f"{key} has {array.shape[0]} rows, expected {rows}")
+            if len(names) > array.shape[-1]:
+                raise ValueError(
+                    f"{key} has width {array.shape[-1]} but {len(names)} names"
+                )
+        except Exception as exc:
+            issues.append(_issue("schema_mismatch", str(exc), path))
+
+    issues.extend(validate_canonical55(spec, table))
+    measurement = ParquetMeasurement(
+        path=str(path),
+        rows=rows,
+        timestamp_min=timestamp_min,
+        timestamp_max=timestamp_max,
+        frame_index_min=frame_index_min,
+        frame_index_max=frame_index_max,
+    )
+    return measurement, timestamps, issues
+
+
+def validate_auxiliary(spec: EpisodeSpec) -> list[Issue]:
+    """Check optional LAP text and declared T5 artifacts without model loading."""
+    issues: list[Issue] = []
+    if spec.language_action_path is not None:
+        path = Path(spec.language_action_path)
+        if not path.is_file():
+            if spec.language_action_declared:
+                issues.append(
+                    _issue(
+                        "missing_declared_language_action",
+                        "declared language action does not exist",
+                        path,
+                    )
+                )
+        else:
+            try:
+                lines = [
+                    line.strip()
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if not lines:
+                    raise ValueError("language action has no non-empty lines")
+            except Exception as exc:
+                issues.append(_issue("invalid_language_action", str(exc), path))
+
+    if spec.t5_embedding_declared and spec.t5_embedding_path is not None:
+        path = Path(spec.t5_embedding_path)
+        if not path.is_file():
+            issues.append(
+                _issue(
+                    "missing_declared_t5_embedding",
+                    "declared T5 embedding does not exist",
+                    path,
+                )
+            )
+        else:
+            try:
+                if path.stat().st_size <= 0:
+                    raise ValueError("T5 embedding file is empty")
+                with path.open("rb") as handle:
+                    handle.read(1)
+            except Exception as exc:
+                issues.append(_issue("invalid_t5_embedding", str(exc), path))
+    return issues
