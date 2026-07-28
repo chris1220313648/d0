@@ -1,6 +1,9 @@
 import json
+import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import av
 import numpy as np
@@ -427,3 +430,169 @@ def test_scan_episode_decodes_every_declared_video_key(tmp_path):
         "observation.images.cam_high_rgb",
         "observation.images.cam_left_wrist_rgb",
     }
+
+
+def _result(scanner, episode_index: int, status: str):
+    issues = ()
+    if status == "bad":
+        issues = (
+            scanner.Issue(
+                code="missing_video",
+                message="missing",
+                path="/data/video.mp4",
+            ),
+        )
+    return scanner.EpisodeResult(
+        task="task",
+        episode_index=episode_index,
+        status=status,
+        elapsed_s=0.1,
+        parquet={"rows": 4},
+        videos=(),
+        issues=issues,
+    )
+
+
+def test_report_writer_flushes_terminal_results_and_summary(tmp_path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    output = tmp_path / "reports"
+    with scanner.ReportWriter(output, overwrite=True) as writer:
+        writer.set_discovered(2)
+        writer.record_episode(_result(scanner, 0, "good"))
+        writer.record_episode(_result(scanner, 1, "bad"))
+        summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        rows = (output / "episode_results.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+
+    assert len(rows) == 2
+    assert summary["episodes_discovered"] == 2
+    assert summary["episodes_scanned"] == 2
+    assert summary["good"] == 1
+    assert summary["bad"] == 1
+    assert summary["errors_by_code"] == {"missing_video": 1}
+    assert len((output / "good_episodes.jsonl").read_text().splitlines()) == 1
+    assert len((output / "bad_episodes.jsonl").read_text().splitlines()) == 1
+
+
+def test_report_writer_rejects_duplicate_terminal_key(tmp_path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    with scanner.ReportWriter(tmp_path / "reports", overwrite=True) as writer:
+        result = _result(scanner, 0, "good")
+        writer.record_episode(result)
+        with pytest.raises(ValueError, match="duplicate terminal result"):
+            writer.record_episode(result)
+
+
+def test_report_writer_resume_rejects_duplicate_task_failure(tmp_path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    output = tmp_path / "reports"
+    failure = scanner.TaskFailure(
+        task="broken_task",
+        code="invalid_task_metadata",
+        message="bad metadata",
+    )
+    with scanner.ReportWriter(output, overwrite=True) as writer:
+        writer.record_task_failure(failure)
+    with scanner.ReportWriter(output, resume=True) as writer:
+        with pytest.raises(ValueError, match="duplicate task failure"):
+            writer.record_task_failure(failure)
+
+
+def test_load_terminal_keys_ignores_truncated_tail(tmp_path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    path = tmp_path / "episode_results.jsonl"
+    path.write_text(
+        '{"task":"task","episode_index":3,"status":"good","issues":[]}\n'
+        '{"task":',
+        encoding="utf-8",
+    )
+
+    assert scanner.load_terminal_keys(path) == {("task", 3)}
+
+
+def test_cli_help_is_runnable():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/scan_robocoin_episode_integrity.py"),
+            "--help",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--resume" in result.stdout
+    assert "--progress-interval" in result.stdout
+
+
+def test_run_scan_writes_good_result_and_resume_skips_it(tmp_path):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    root = tmp_path / "data"
+    task_root = _make_task(
+        root,
+        "task",
+        [{"episode_index": 0, "length": 4}],
+    )
+    _write_parquet(task_root)
+    _write_video(_default_video_path(task_root), frame_count=4)
+    output = tmp_path / "reports"
+    args = SimpleNamespace(
+        root=root,
+        output_dir=output,
+        workers=1,
+        task=None,
+        episode=None,
+        resume=False,
+        overwrite=True,
+        progress_interval=1,
+    )
+
+    assert scanner.run_scan(args) == 0
+    assert scanner.run_scan(
+        replace(
+            scanner.ScanArguments.from_namespace(args),
+            resume=True,
+            overwrite=False,
+        )
+    ) == 0
+
+    rows = (output / "episode_results.jsonl").read_text().splitlines()
+    summary = json.loads((output / "summary.json").read_text())
+    assert len(rows) == 1
+    assert summary["episodes_scanned"] == 1
+    assert summary["episodes_skipped_resume"] == 1
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"workers": 0},
+        {"resume": True, "overwrite": True},
+        {"progress_interval": 0},
+    ],
+)
+def test_run_scan_rejects_invalid_arguments(tmp_path, updates):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    values = {
+        "root": tmp_path / "data",
+        "output_dir": tmp_path / "reports",
+        "workers": 1,
+        "task": None,
+        "episode": None,
+        "resume": False,
+        "overwrite": False,
+        "progress_interval": 1,
+    }
+    values.update(updates)
+
+    assert scanner.run_scan(SimpleNamespace(**values)) == 2

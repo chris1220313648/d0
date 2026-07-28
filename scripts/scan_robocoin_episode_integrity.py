@@ -3,12 +3,21 @@
 
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
 import json
+import logging
+import os
+import sys
 import time
 import traceback as traceback_module
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import av
 import numpy as np
@@ -24,6 +33,15 @@ DEFAULT_OUTPUT_DIR = Path(
     "outputs/motus-multidataset_lap_v2/robocoin_full_scan"
 )
 DEFAULT_TOLERANCE_S = 0.0001
+REPORT_FILENAMES = (
+    "episode_results.jsonl",
+    "good_episodes.jsonl",
+    "bad_episodes.jsonl",
+    "task_failures.jsonl",
+    "summary.json",
+    "scan.log",
+)
+LOGGER = logging.getLogger("robocoin_integrity_scan")
 
 
 @dataclass(frozen=True)
@@ -71,6 +89,31 @@ class EpisodeSpec:
     language_action_declared: bool
     t5_embedding_path: str | None
     t5_embedding_declared: bool
+
+
+@dataclass(frozen=True)
+class ScanArguments:
+    root: Path
+    output_dir: Path
+    workers: int
+    task: str | None
+    episode: int | None
+    resume: bool
+    overwrite: bool
+    progress_interval: int
+
+    @classmethod
+    def from_namespace(cls, args: Any) -> "ScanArguments":
+        return cls(
+            root=Path(args.root),
+            output_dir=Path(args.output_dir),
+            workers=int(args.workers),
+            task=args.task,
+            episode=args.episode,
+            resume=bool(args.resume),
+            overwrite=bool(args.overwrite),
+            progress_interval=int(args.progress_interval),
+        )
 
 
 @dataclass(frozen=True)
@@ -663,3 +706,348 @@ def scan_episode(spec: EpisodeSpec) -> EpisodeResult:
         issues=tuple(issues),
         traceback=unexpected_traceback,
     )
+
+
+def _iter_jsonl(path: Path):
+    if not path.is_file():
+        return
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                LOGGER.warning("Ignoring malformed JSONL tail at %s:%d", path, line_number)
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
+def load_terminal_keys(path: Path) -> set[tuple[str, int]]:
+    """Load parseable terminal episode identities from an incremental report."""
+    keys: set[tuple[str, int]] = set()
+    for row in _iter_jsonl(path) or ():
+        try:
+            if row.get("status") not in {"good", "bad"}:
+                continue
+            keys.add((str(row["task"]), int(row["episode_index"])))
+        except (KeyError, TypeError, ValueError):
+            LOGGER.warning("Ignoring invalid terminal row in %s", path)
+    return keys
+
+
+class ReportWriter:
+    """Parent-process owner for incremental JSONL reports and summaries."""
+
+    def __init__(
+        self,
+        output_dir: Path,
+        *,
+        overwrite: bool = False,
+        resume: bool = False,
+    ):
+        if overwrite and resume:
+            raise ValueError("overwrite and resume are mutually exclusive")
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        if overwrite:
+            for name in REPORT_FILENAMES:
+                path = self.output_dir / name
+                if path.is_file():
+                    path.unlink()
+        self.terminal_keys: set[tuple[str, int]] = set()
+        self.task_failure_keys: set[tuple[str, str]] = set()
+        self.summary: dict[str, Any] = {
+            "episodes_discovered": 0,
+            "episodes_skipped_resume": 0,
+            "episodes_scanned": 0,
+            "good": 0,
+            "bad": 0,
+            "task_failures": 0,
+            "errors_by_code": {},
+            "tasks": {},
+        }
+        if resume:
+            self._rebuild_from_existing()
+        self._episode_handle = self._open("episode_results.jsonl")
+        self._good_handle = self._open("good_episodes.jsonl")
+        self._bad_handle = self._open("bad_episodes.jsonl")
+        self._task_handle = self._open("task_failures.jsonl")
+        self._write_summary()
+
+    def _open(self, name: str):
+        return (self.output_dir / name).open("a", encoding="utf-8")
+
+    def _rebuild_from_existing(self) -> None:
+        path = self.output_dir / "episode_results.jsonl"
+        for row in _iter_jsonl(path) or ():
+            try:
+                key = (str(row["task"]), int(row["episode_index"]))
+                status = str(row["status"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if status not in {"good", "bad"} or key in self.terminal_keys:
+                continue
+            self.terminal_keys.add(key)
+            self._accumulate_episode_row(row)
+        for row in _iter_jsonl(self.output_dir / "task_failures.jsonl") or ():
+            try:
+                self.task_failure_keys.add((str(row["task"]), str(row["code"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+            self.summary["task_failures"] += 1
+
+    def _task_counts(self, task: str) -> dict[str, int]:
+        return self.summary["tasks"].setdefault(
+            task,
+            {"scanned": 0, "good": 0, "bad": 0},
+        )
+
+    def _accumulate_episode_row(self, row: dict[str, Any]) -> None:
+        status = str(row["status"])
+        task = str(row["task"])
+        self.summary["episodes_scanned"] += 1
+        self.summary[status] += 1
+        task_counts = self._task_counts(task)
+        task_counts["scanned"] += 1
+        task_counts[status] += 1
+        for issue in row.get("issues", []):
+            code = issue.get("code") if isinstance(issue, dict) else None
+            if code:
+                errors = self.summary["errors_by_code"]
+                errors[code] = errors.get(code, 0) + 1
+
+    def set_discovered(self, count: int, skipped_resume: int = 0) -> None:
+        self.summary["episodes_discovered"] = int(count)
+        self.summary["episodes_skipped_resume"] = int(skipped_resume)
+        self._write_summary()
+
+    def record_episode(self, result: EpisodeResult) -> None:
+        key = (result.task, result.episode_index)
+        if key in self.terminal_keys:
+            raise ValueError(f"duplicate terminal result for {key}")
+        row = asdict(result)
+        serialized = json.dumps(row, ensure_ascii=False, sort_keys=True)
+        self._episode_handle.write(serialized + "\n")
+        subset_handle = self._good_handle if result.status == "good" else self._bad_handle
+        subset_handle.write(serialized + "\n")
+        self._episode_handle.flush()
+        subset_handle.flush()
+        self.terminal_keys.add(key)
+        self._accumulate_episode_row(row)
+        self._write_summary()
+
+    def record_task_failure(self, failure: TaskFailure) -> None:
+        key = (failure.task, failure.code)
+        if key in self.task_failure_keys:
+            raise ValueError(f"duplicate task failure for {key}")
+        self._task_handle.write(
+            json.dumps(asdict(failure), ensure_ascii=False, sort_keys=True) + "\n"
+        )
+        self._task_handle.flush()
+        self.task_failure_keys.add(key)
+        self.summary["task_failures"] += 1
+        self._write_summary()
+
+    def _write_summary(self) -> None:
+        temporary = self.output_dir / "summary.json.tmp"
+        temporary.write_text(
+            json.dumps(self.summary, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.output_dir / "summary.json")
+
+    def close(self) -> None:
+        self._write_summary()
+        for handle in (
+            self._episode_handle,
+            self._good_handle,
+            self._bad_handle,
+            self._task_handle,
+        ):
+            handle.close()
+
+    def __enter__(self) -> "ReportWriter":
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
+        self.close()
+
+
+def _configure_logging(output_dir: Path) -> None:
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.handlers.clear()
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    stream = logging.StreamHandler()
+    stream.setFormatter(formatter)
+    file_handler = logging.FileHandler(output_dir / "scan.log", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    LOGGER.addHandler(stream)
+    LOGGER.addHandler(file_handler)
+
+
+def _worker_failure(spec: EpisodeSpec, exc: BaseException) -> EpisodeResult:
+    trace = "".join(traceback_module.format_exception(type(exc), exc, exc.__traceback__))
+    return EpisodeResult(
+        task=spec.task,
+        episode_index=spec.episode_index,
+        status="bad",
+        elapsed_s=0.0,
+        parquet=None,
+        videos=(),
+        issues=(Issue(code="unexpected_error", message=str(exc)),),
+        traceback=trace,
+    )
+
+
+def _scan_with_bounded_pool(
+    specs: Sequence[EpisodeSpec],
+    workers: int,
+):
+    iterator = iter(specs)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+        pending: dict[concurrent.futures.Future, EpisodeSpec] = {}
+
+        def submit_one() -> bool:
+            try:
+                spec = next(iterator)
+            except StopIteration:
+                return False
+            pending[executor.submit(scan_episode, spec)] = spec
+            return True
+
+        for _ in range(min(len(specs), workers * 2)):
+            submit_one()
+        while pending:
+            done, _ = concurrent.futures.wait(
+                pending,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                spec = pending.pop(future)
+                try:
+                    yield future.result()
+                except BaseException as exc:
+                    yield _worker_failure(spec, exc)
+                submit_one()
+
+
+def run_scan(raw_args: Any) -> int:
+    """Validate arguments, run the scan, and return the documented exit code."""
+    try:
+        args = (
+            raw_args
+            if isinstance(raw_args, ScanArguments)
+            else ScanArguments.from_namespace(raw_args)
+        )
+        if args.workers < 1:
+            raise ValueError("workers must be at least 1")
+        if args.progress_interval < 1:
+            raise ValueError("progress_interval must be at least 1")
+        if args.resume and args.overwrite:
+            raise ValueError("resume and overwrite are mutually exclusive")
+        if not args.root.is_dir():
+            raise ValueError(f"root is not a directory: {args.root}")
+        known_outputs_exist = any(
+            (args.output_dir / name).exists() for name in REPORT_FILENAMES
+        )
+        if known_outputs_exist and not args.resume and not args.overwrite:
+            raise ValueError(
+                f"report output already exists; use --resume or --overwrite: "
+                f"{args.output_dir}"
+            )
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        with ReportWriter(
+            args.output_dir,
+            overwrite=args.overwrite,
+            resume=args.resume,
+        ) as writer:
+            _configure_logging(args.output_dir)
+            episodes, task_failures = discover_episodes(
+                args.root,
+                args.task,
+                args.episode,
+            )
+            for failure in task_failures:
+                if (failure.task, failure.code) not in writer.task_failure_keys:
+                    writer.record_task_failure(failure)
+            pending = [
+                spec
+                for spec in episodes
+                if (spec.task, spec.episode_index) not in writer.terminal_keys
+            ]
+            writer.set_discovered(
+                len(episodes),
+                skipped_resume=len(episodes) - len(pending),
+            )
+            started = time.monotonic()
+            completed_this_run = 0
+            try:
+                for result in _scan_with_bounded_pool(pending, args.workers):
+                    writer.record_episode(result)
+                    completed_this_run += 1
+                    if completed_this_run % args.progress_interval == 0:
+                        elapsed = max(time.monotonic() - started, 1e-9)
+                        LOGGER.info(
+                            "progress scanned=%d/%d good=%d bad=%d rate=%.2f ep/s",
+                            writer.summary["episodes_scanned"],
+                            len(episodes),
+                            writer.summary["good"],
+                            writer.summary["bad"],
+                            completed_this_run / elapsed,
+                        )
+            except KeyboardInterrupt:
+                LOGGER.warning("Interrupted; completed results have been persisted")
+                return 130
+            LOGGER.info(
+                "complete discovered=%d scanned=%d good=%d bad=%d task_failures=%d",
+                len(episodes),
+                writer.summary["episodes_scanned"],
+                writer.summary["good"],
+                writer.summary["bad"],
+                writer.summary["task_failures"],
+            )
+            return (
+                1
+                if writer.summary["bad"] or writer.summary["task_failures"]
+                else 0
+            )
+    except Exception as exc:
+        LOGGER.exception("scan could not start or complete: %s", exc)
+        return 2
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Read every RoboCOIN episode parquet and fully decode every "
+            "declared video stream."
+        )
+    )
+    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(4, os.cpu_count() or 1),
+    )
+    parser.add_argument("--task")
+    parser.add_argument("--episode", type=int)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--progress-interval", type=int, default=100)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    return run_scan(build_parser().parse_args(argv))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
