@@ -15,7 +15,8 @@ The scanner does not delete, rename, truncate, rewrite, or repair source data.
 Add `scripts/scan_robocoin_episode_integrity.py` with these defaults:
 
 - Input root: `/root/nas/code/d0/data/robot_data/robocoin`
-- Output directory: `outputs/robocoin_integrity_scan`
+- Output directory:
+  `outputs/motus-multidataset_lap_v2/robocoin_full_scan`
 - Worker count: a conservative CPU default, overridable with `--workers`
 - Resume: enabled when an existing per-episode result file is supplied
 - Video backend: PyAV from the `motus` environment
