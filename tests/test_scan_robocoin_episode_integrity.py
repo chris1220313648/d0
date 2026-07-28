@@ -208,6 +208,24 @@ def test_resolve_episode_path_rejects_escape(tmp_path):
         )
 
 
+def test_resolve_episode_path_does_not_stat_target(tmp_path, monkeypatch):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    def reject_resolve(self, *args, **kwargs):
+        raise AssertionError("Path.resolve performs a NAS metadata lookup")
+
+    monkeypatch.setattr(Path, "resolve", reject_resolve)
+
+    result = scanner.resolve_episode_path(
+        tmp_path,
+        "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+        3,
+        1000,
+    )
+
+    assert result == tmp_path / "data/chunk-000/episode_000003.parquet"
+
+
 def test_validate_parquet_accepts_valid_episode_and_maps_canonical55(tmp_path):
     task_root = _make_task(
         tmp_path,
@@ -596,3 +614,32 @@ def test_run_scan_rejects_invalid_arguments(tmp_path, updates):
     values.update(updates)
 
     assert scanner.run_scan(SimpleNamespace(**values)) == 2
+
+
+def test_run_scan_persists_summary_when_discovery_is_interrupted(
+    tmp_path,
+    monkeypatch,
+):
+    from scripts import scan_robocoin_episode_integrity as scanner
+
+    root = tmp_path / "data"
+    root.mkdir()
+    output = tmp_path / "reports"
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(scanner, "discover_episodes", interrupt)
+    args = SimpleNamespace(
+        root=root,
+        output_dir=output,
+        workers=1,
+        task=None,
+        episode=None,
+        resume=False,
+        overwrite=True,
+        progress_interval=1,
+    )
+
+    assert scanner.run_scan(args) == 130
+    assert (output / "summary.json").is_file()

@@ -151,9 +151,13 @@ def resolve_episode_path(
         episode_index=episode_index,
         video_key=video_key,
     )
-    root = task_root.resolve()
-    candidate = (task_root / relative).resolve()
-    if not candidate.is_relative_to(root):
+    root = Path(os.path.abspath(os.path.normpath(task_root)))
+    candidate = Path(os.path.abspath(os.path.normpath(task_root / relative)))
+    try:
+        inside_root = os.path.commonpath((str(root), str(candidate))) == str(root)
+    except ValueError:
+        inside_root = False
+    if not inside_root:
         raise ValueError(f"resolved path is outside task root: {candidate}")
     return candidate
 
@@ -178,8 +182,13 @@ def _auxiliary_path(
     path = Path(str(value))
     if not path.is_absolute():
         path = task_root / path
-    path = path.resolve()
-    if not path.is_relative_to(task_root.resolve()):
+    root = Path(os.path.abspath(os.path.normpath(task_root)))
+    path = Path(os.path.abspath(os.path.normpath(path)))
+    try:
+        inside_root = os.path.commonpath((str(root), str(path))) == str(root)
+    except ValueError:
+        inside_root = False
+    if not inside_root:
         raise ValueError(f"auxiliary path is outside task root: {path}")
     return str(path)
 
@@ -250,7 +259,7 @@ def _discover_task(task_root: Path) -> list[EpisodeSpec]:
             )
             specs.append(
                 EpisodeSpec(
-                    root=str(task_root.resolve()),
+                    root=str(Path(os.path.abspath(os.path.normpath(task_root)))),
                     task=task_root.name,
                     episode_index=episode_index,
                     declared_length=declared_length,
@@ -1018,6 +1027,9 @@ def run_scan(raw_args: Any) -> int:
                 if writer.summary["bad"] or writer.summary["task_failures"]
                 else 0
             )
+    except KeyboardInterrupt:
+        LOGGER.warning("Interrupted; completed results have been persisted")
+        return 130
     except Exception as exc:
         LOGGER.exception("scan could not start or complete: %s", exc)
         return 2
