@@ -1,0 +1,32 @@
+version: 1
+collection_name: pick_anything
+root: /root/nas/piper_data/pick_anything
+normalization_stats_path: /root/nas/piper_data/pick_anything/motus_shared/stats.json
+datasets:
+  - name: pick_keys
+    path: pick-keys-trim
+    weight: 1.0
+    use_for_val: true
+    excluded_episode_indices: [16]
+  - name: pick_orange_cup
+    path: pick-orange-cup-trim
+    weight: 1.0
+  - name: pick_pen
+    path: pick-pen-trim
+    weight: 1.0
+    task_text: Pick up pen and put it on the plate
+  - name: pick_pink_cup
+    path: pick-pink-cup-trim
+    weight: 1.0
+  - name: pick_tape
+    path: pick-tape-trim
+    weight: 1.0
+  - name: pick_tissue
+    path: pick-tissue-trim
+    weight: 1.0
+  - name: pick_watch
+    path: pick-watch-trim
+    weight: 1.0
+  - name: pick_water_bottle
+    path: pick-water-bottle-trim
+    weight: 1.0

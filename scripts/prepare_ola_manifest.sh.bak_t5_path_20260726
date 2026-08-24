@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="${PROJECT_ROOT:-/root/nas/code/d0}"
+MANIFEST="${1:?Usage: prepare_ola_manifest.sh MANIFEST [extra prepare arguments...]}"
+shift
+cd "$PROJECT_ROOT"
+
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+    source /opt/conda/etc/profile.d/conda.sh
+elif [ -f /share/anaconda3/etc/profile.d/conda.sh ]; then
+    source /share/anaconda3/etc/profile.d/conda.sh
+else
+    echo "[ERROR] Could not find conda.sh" >&2
+    exit 1
+fi
+conda activate motus
+
+python data/lerobot/prepare_ola_v3_motus.py \
+    --manifest "$MANIFEST" \
+    --window-size 48 \
+    --num-video-frames 8 \
+    --encode-t5 \
+    --wan-path ./pretrained_models/Wan2.2-TI2V-5B \
+    "$@"

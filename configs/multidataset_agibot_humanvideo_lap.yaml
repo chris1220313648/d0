@@ -1,7 +1,7 @@
 common:
-  # AgiBot uses 24-D actions; EgoVerse zero placeholders are padded/masked to match.
-  action_dim: 24
-  state_dim: 14
+  # canonical55_v2 state/action vectors; dataset-specific valid slots are masked.
+  action_dim: 55
+  state_dim: 55
 
   # Shared video settings
   num_video_frames: 8
@@ -16,8 +16,9 @@ common:
 dataset:
   type: "multi"
   sampling: "weighted"
-  target_action_dim: 24
-  target_state_dim: 14
+  canonical_format: "canonical55_v2"
+  target_action_dim: 55
+  target_state_dim: 55
   datasets:
     - name: "agibot_lerobot"
       type: "lerobot_agibot"
@@ -28,6 +29,8 @@ dataset:
       task_mode: "multi"
       task_name: null
       use_language_action: true
+      normalize_actions: true
+      stats_key: "agibot"
 
       params:
         # Replace these before launching training.
@@ -36,7 +39,6 @@ dataset:
 
         embodiment_type: "agibot"
         language_action_dir_name: "language_action"
-        normalize_actions: false
 
         enable_t5_fallback: true
         t5_wan_path: "./pretrained_models"

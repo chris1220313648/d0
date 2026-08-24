@@ -17,11 +17,40 @@ Every loader should return samples compatible with `data/dataset.py::collate_fn`
     "language_embedding": Tensor[S, D],          # optional
     "vlm_inputs": dict | None,                   # optional
     "action_mask": Tensor[T, action_dim] | None, # optional
+    "state_mask": Tensor[state_dim] | None,      # optional
+    "canonical_format": str | None,              # optional
 }
 ```
 
 `MultiDataset` pads `action_sequence` and `initial_state` to
 `dataset.target_action_dim` and `dataset.target_state_dim`.
+
+## Canonical 55D Format
+
+Set `dataset.canonical_format: "canonical55_v2"` to wrap dataset samples into a
+fixed 55D state/action vector with boolean masks. Values keep each dataset's
+existing coordinate frame and units; the wrapper only remaps slots, pads zeros,
+and marks valid dimensions.
+
+```text
+0:14    arm_joint_pos       left/primary 0:7, right 7:14; no gripper
+14:26   eef_pose_or_delta   left/primary xyz+rpy, right xyz+rpy
+26:28   gripper             left/primary, right
+28:40   hand_joint
+40:44   waist
+44:46   head
+46:49   base / mobility
+49:55   reserved
+```
+
+Current mappings:
+
+- RobotWin/Aloha-style 14D qpos: left 6 joints + left gripper, right 6 joints
+  + right gripper. Missing seventh arm-joint slots are masked out.
+- Bridge/DROID/Fractal 7D epos: primary EEF xyz+rpy plus gripper.
+- AgiBot 24D action: dual EEF xyz+rpy, dual gripper, truncated head/waist/base
+  slots according to the 55D layout.
+- Zero-action datasets emit zero canonical vectors with invalid action masks.
 
 ## LeRobot Datasets
 
@@ -457,4 +486,3 @@ dataset:
 
 The child loader returns its native action/state dimensions. The wrapper pads
 them to `target_action_dim` and `target_state_dim`.
-

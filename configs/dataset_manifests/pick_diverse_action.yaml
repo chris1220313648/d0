@@ -1,0 +1,27 @@
+version: 1
+collection_name: pick_diverse_action
+root: /root/nas/piper_data/pick_diverse_action
+normalization_stats_path: /root/nas/piper_data/pick_diverse_action/motus_shared/stats.json
+datasets:
+  - name: orange_lid
+    path: orange-lid-trim
+    weight: 1.0
+    use_for_val: true
+    task_text: put the lid on the orange cup
+  - name: pick_calculator
+    path: pick-calculator-trim
+    weight: 1.0
+    task_text: pick up the calculator and put it into plate
+  - name: pick_orange_cup
+    path: pick-orange-cup-trim
+    weight: 1.0
+    task_text: Pick up orange cup and put it on the plate
+  - name: pick_pen
+    path: pick-pen-trim
+    weight: 1.0
+    task_text: Pick up pen and put it on the plate
+  - name: press_calculator
+    path: press-calcultor-trim
+    weight: 1.0
+    task_text: press the calculator
+    excluded_episode_indices: [10, 34]

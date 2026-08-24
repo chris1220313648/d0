@@ -131,7 +131,7 @@ def preprocess_vlm_messages_lap(
         and random.random() < ik_language_action_sampling_rate
     )
     if use_ik_question:
-        question = "predict the robot's action between two images in the prediction"
+        question = f"Task：{text_instruction}\npredict the robot's action between two images in the prediction"
     else:
         question = f"Task：{text_instruction}\nPlease provide a language description of the next action."
     user_content = [{"type": "image", "image": image_pil}]

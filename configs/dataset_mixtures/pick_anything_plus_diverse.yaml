@@ -1,0 +1,8 @@
+version: 1
+mixture_name: pick_anything_plus_diverse
+collections:
+  - ../dataset_manifests/pick_anything.yaml
+  - ../dataset_manifests/pick_diverse_action.yaml
+normalization:
+  mode: q01_q99
+  stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json

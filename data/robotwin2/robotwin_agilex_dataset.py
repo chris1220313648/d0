@@ -367,7 +367,7 @@ class RobotWinTaskDataset(data.Dataset):
             - action_sequence: Actions at specified indices [len(action_indices), action_dim]
             - history_action_sequence: Historical qpos values, or None
         """
-        qpos_data = torch.load(qpos_path, map_location='cpu')  # [T, feature_dim]
+        qpos_data = torch.load(qpos_path, map_location='cpu', weights_only=True)  # [T, feature_dim]
         
         # Get initial state at the condition frame index
         if initial_state_idx >= len(qpos_data):
@@ -402,7 +402,7 @@ class RobotWinTaskDataset(data.Dataset):
     def _load_language_embedding(self, lang_path: str) -> tuple[torch.Tensor, int]:
         """Load pre-encoded language embedding and return the selected index."""
         try:
-            embedding_data = torch.load(lang_path, map_location='cpu')
+            embedding_data = torch.load(lang_path, map_location='cpu', weights_only=True)
             
             # RobotWin embedding is always a list of tensors
             selected_idx = random.randint(0, len(embedding_data) - 1)

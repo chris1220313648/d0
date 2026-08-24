@@ -1,5 +1,5 @@
 common:
-  # AgiBot returns 24-D actions; EgoVerse zero actions are padded/masked.
+  # Native multidataset action/state vectors without canonical55 wrapping.
   action_dim: 24
   state_dim: 14
 
@@ -27,11 +27,11 @@ dataset:
       max_episodes: null
       image_aug: false
       use_language_action: true
+      normalize_actions: true
+      stats_key: "agibot"
       params:
         root: "/root/nas/code/d0/data/robot_data/AgiBotWorld2026"
         repo_id: "AgiBotWorld2026"
-        # AgiBot disables action normalization, but the LeRobot base class still
-        # loads a stat key during init. Use an existing key to keep init valid.
         embodiment_type: "aloha_agilex_2"
         language_action_dir_name: "language_action"
         enable_t5_fallback: false

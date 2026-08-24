@@ -11,6 +11,111 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def load_masked_normalization_stats(
+    stats_path: str,
+    dataset_name: str,
+    signal_name: str,
+    expected_dim: int = 55,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load min/max/active-mask statistics for a canonical masked signal."""
+    import json
+
+    with open(stats_path, "r", encoding="utf-8") as f:
+        all_stats = json.load(f)
+    try:
+        signal_stats = all_stats[dataset_name][signal_name]
+        minimum = np.asarray(signal_stats["min"], dtype=np.float32)
+        maximum = np.asarray(signal_stats["max"], dtype=np.float32)
+        active_mask = np.asarray(signal_stats["active_mask"], dtype=np.bool_)
+    except KeyError as exc:
+        raise KeyError(
+            f"Missing masked normalization stats for {dataset_name}/{signal_name} in {stats_path}"
+        ) from exc
+
+    for field_name, value in (
+        ("min", minimum),
+        ("max", maximum),
+        ("active_mask", active_mask),
+    ):
+        if value.ndim != 1 or value.shape[0] != expected_dim:
+            raise ValueError(
+                f"{dataset_name}/{signal_name} {field_name} expected {expected_dim} values, "
+                f"got shape {value.shape}"
+            )
+    if not np.isfinite(minimum[active_mask]).all() or not np.isfinite(maximum[active_mask]).all():
+        raise ValueError(f"{dataset_name}/{signal_name} contains non-finite active statistics")
+    if np.any(maximum[active_mask] < minimum[active_mask]):
+        raise ValueError(f"{dataset_name}/{signal_name} has max values below min values")
+    logger.info("Loaded masked normalization stats for %s/%s from %s", dataset_name, signal_name, stats_path)
+    return minimum, maximum, active_mask
+
+
+def _masked_stat_tensors(
+    values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    minimum: np.ndarray,
+    maximum: np.ndarray,
+    active_mask: np.ndarray,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if values.shape != valid_mask.shape:
+        raise ValueError(
+            f"values and valid_mask must have identical shapes, got {values.shape} and {valid_mask.shape}"
+        )
+    expected_dim = values.shape[-1]
+    for field_name, stat in (
+        ("minimum", minimum),
+        ("maximum", maximum),
+        ("active_mask", active_mask),
+    ):
+        if np.asarray(stat).shape != (expected_dim,):
+            raise ValueError(f"{field_name} expected shape ({expected_dim},), got {np.asarray(stat).shape}")
+
+    valid = valid_mask.to(device=values.device, dtype=torch.bool)
+    active = torch.as_tensor(active_mask, device=values.device, dtype=torch.bool)
+    if torch.any(valid & ~active):
+        missing = torch.nonzero((valid & ~active).reshape(-1, expected_dim).any(dim=0)).flatten().tolist()
+        raise ValueError(f"valid dimensions missing normalization stats: {missing}")
+    if not torch.isfinite(values[valid]).all():
+        raise ValueError("Cannot normalize non-finite values in valid dimensions")
+
+    minimum_t = torch.as_tensor(minimum, device=values.device, dtype=values.dtype)
+    maximum_t = torch.as_tensor(maximum, device=values.device, dtype=values.dtype)
+    return valid, active, minimum_t, maximum_t
+
+
+def normalize_masked(
+    values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    minimum: np.ndarray,
+    maximum: np.ndarray,
+    active_mask: np.ndarray,
+) -> torch.Tensor:
+    """Normalize valid canonical dimensions to [0, 1], leaving invalid dimensions at zero."""
+    valid, _, minimum_t, maximum_t = _masked_stat_tensors(
+        values, valid_mask, minimum, maximum, active_mask
+    )
+    span = maximum_t - minimum_t
+    safe_span = torch.where(span > 0, span, torch.ones_like(span))
+    normalized = ((values - minimum_t) / safe_span).clamp_(0.0, 1.0)
+    normalized = torch.where(span > 0, normalized, torch.zeros_like(normalized))
+    return torch.where(valid, normalized, torch.zeros_like(normalized))
+
+
+def denormalize_masked(
+    normalized_values: torch.Tensor,
+    valid_mask: torch.Tensor,
+    minimum: np.ndarray,
+    maximum: np.ndarray,
+    active_mask: np.ndarray,
+) -> torch.Tensor:
+    """Restore valid canonical dimensions from [0, 1] to their source scale."""
+    valid, _, minimum_t, maximum_t = _masked_stat_tensors(
+        normalized_values, valid_mask, minimum, maximum, active_mask
+    )
+    restored = normalized_values * (maximum_t - minimum_t) + minimum_t
+    return torch.where(valid, restored, torch.zeros_like(restored))
+
+
 def normalize_actions(actions: torch.Tensor, action_min: np.ndarray, action_max: np.ndarray) -> torch.Tensor:
     """
     Normalize actions to [0, 1] range using provided statistics.
@@ -113,9 +218,9 @@ def load_normalization_stats(
         
         stat_name = f"{dataset_name}/{signal_name}" if signal_name is not None else dataset_name
         logger.info(f"Loaded normalization stats for {stat_name} from {stats_path}")
-        logger.info(f"  Action min: {action_min}")
-        logger.info(f"  Action max: {action_max}")
-        logger.info(f"  Action range: {action_max - action_min}")
+        # logger.info(f"  Action min: {action_min}")
+        # logger.info(f"  Action max: {action_max}")
+        # logger.info(f"  Action range: {action_max - action_min}")
         
         return action_min, action_max
         

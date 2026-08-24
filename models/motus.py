@@ -76,6 +76,7 @@ class MotusConfig:
     # Loss weights
     video_loss_weight: float = 1.0
     action_loss_weight: float = 1.0
+    vlm_loss_weight: float = 1.0
 
     # Action and video flow sources. A missing video mode follows the action
     # mode for compatibility with checkpoints created before they were split.
@@ -360,7 +361,7 @@ class UndModule(nn.Module):
             'past_key_values': None,
             'use_cache': False,
             'output_attentions': False,
-            'output_hidden_states': True,
+            'output_hidden_states': False,
             'return_dict': True
         }
 
@@ -376,11 +377,11 @@ class UndModule(nn.Module):
         if use_no_grad:#冻住vlm
             with torch.no_grad():
                 vlm_output = self.vlm_model.model.language_model(**vlm_kwargs)
-            last_layer_features = vlm_output.hidden_states[-1]  # [B, seq_len, vlm_dim]
+            last_layer_features = vlm_output.last_hidden_state  # [B, seq_len, vlm_dim]
         else:
             # logger.info("VLM grad enabled")
             vlm_output = self.vlm_model.model.language_model(**vlm_kwargs)
-            last_layer_features = vlm_output.hidden_states[-1]  # [B, seq_len, vlm_dim]
+            last_layer_features = vlm_output.last_hidden_state  # [B, seq_len, vlm_dim]
             if 'labels' in vlm_inputs:
                 # hidden_states = last_layer_features
                 logits = self.vlm_model.lm_head(last_layer_features)  
@@ -826,7 +827,11 @@ class Motus(nn.Module):
                           if k not in ['module', 'config']}
         return additional_state
 
-    def load_pretrain_weights(self, path: str) -> None:
+    def load_pretrain_weights(
+        self,
+        path: str,
+        load_vlm_weights: bool = True,
+    ) -> None:
         """Load weights from a pretrain checkpoint when current mode is finetune.
 
         Skips layers that depend on state vs action-only differences:
@@ -871,10 +876,18 @@ class Motus(nn.Module):
         for k, v in state_dict.items():
             if ('action_expert.input_encoder' in k or 'action_expert.decoder' in k):
                 continue
+            if not load_vlm_weights and k.startswith('vlm_model.'):
+                continue
             filtered[k] = v
         
         missing, unexpected = self.load_state_dict(filtered, strict=False)
-        logger.info(f"Loaded pretrain weights (filtered). Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+        logger.info(
+            "Loaded pretrain weights (filtered). "
+            "VLM weights=%s, Missing: %d, Unexpected: %d",
+            load_vlm_weights,
+            len(missing),
+            len(unexpected),
+        )
 
     def training_step(
         self,
@@ -1076,7 +1089,7 @@ class Motus(nn.Module):
             self.config.action_loss_weight * action_loss
         )
         if llm_loss is not None:
-            total_loss += llm_loss
+            total_loss += self.config.vlm_loss_weight * llm_loss
             # logger.info("llm_loss is not None")
         
         if return_dict:
@@ -1099,7 +1112,8 @@ class Motus(nn.Module):
         language_embeddings: Optional[List[torch.Tensor]] = None,
         vlm_inputs: Optional[List] = None,
         action_source: torch.Tensor = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        decode_video: bool = True,
+    ) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         """
         Joint inference for video and action prediction.
         
@@ -1110,6 +1124,7 @@ class Motus(nn.Module):
             state: Initial robot state [B, state_dim]
             num_inference_steps: Number of denoising steps
             language_embeddings: Pre-encoded T5 embeddings for WAN model
+            decode_video: Decode predicted video frames. Disable for action-only deployment.
             
         Returns:
             Tuple of (predicted_frames, predicted_actions)
@@ -1159,9 +1174,10 @@ class Motus(nn.Module):
 
         # 2. Understanding Expert features and T5 context
         # Extract understanding features from VLM
-        und_tokens = self.und_module.extract_und_features(vlm_inputs)
-        if isinstance(und_tokens, tuple):
-            und_tokens = und_tokens[0]
+        base_und_tokens = self.und_module.extract_und_features(vlm_inputs)
+        if isinstance(base_und_tokens, tuple):
+            base_und_tokens = base_und_tokens[0]
+        und_k_lens = self._build_und_k_lens(vlm_inputs, base_und_tokens)
 
 
         # T5 preprocess
@@ -1184,11 +1200,9 @@ class Motus(nn.Module):
             registers = self.action_expert.registers.expand(B, -1, -1)  # [B, num_registers, dim]
             action_tokens = self.action_expert.input_encoder(state_tokens, action_latent, registers)
 
-            # Note: Understanding tokens already extracted before the loop, will be updated in joint attention
-            und_tokens = self.und_module.extract_und_features(vlm_inputs)  # [B, num_queries * num_layers, und_dim]
-            if isinstance(und_tokens, tuple):
-                und_tokens = und_tokens[0]
-            und_k_lens = self._build_und_k_lens(vlm_inputs, und_tokens)
+            # Each denoising step starts from the same static VLM conditioning.
+            # Clone preserves that reset semantics without rerunning the full VLM.
+            und_tokens = base_und_tokens.clone()
 
             
             # Trimodal MoT forward - joint denoising for WAN, Action, Understanding
@@ -1235,12 +1249,15 @@ class Motus(nn.Module):
                 # Teacher Forcing
                 video_latent[:, :, 0:1] = condition_frame_latent
 
-        # 4. Decode outputs
-        with torch.no_grad():
-            decoded_frames = self.video_model.decode_video(video_latent)
-            predicted_frames = decoded_frames[:, :, 1:]  # Skip first frame (condition)
-            predicted_frames = (predicted_frames + 1.0) / 2.0  # [-1,1] to [0,1]
-            predicted_frames = torch.clamp(predicted_frames, 0, 1).float()
+        # 4. Decode video only for callers that consume it. The action-only deployment
+        # still runs video denoising above because video latents condition the action path.
+        predicted_frames = None
+        if decode_video:
+            with torch.no_grad():
+                decoded_frames = self.video_model.decode_video(video_latent)
+                predicted_frames = decoded_frames[:, :, 1:]  # Skip first frame (condition)
+                predicted_frames = (predicted_frames + 1.0) / 2.0  # [-1,1] to [0,1]
+                predicted_frames = torch.clamp(predicted_frames, 0, 1).float()
         
         predicted_actions = action_latent.float()  # [B, action_chunk_size, 14]
 

@@ -1,0 +1,799 @@
+common:
+  action_dim: 14
+  state_dim: 14
+  num_video_frames: 8
+  video_height: 384
+  video_width: 320
+  global_downsample_rate: 1
+  video_action_freq_ratio: 6
+dataset:
+  type: multi
+  target_action_dim: 14
+  target_state_dim: 14
+  datasets:
+  - name: pick_anything__pick_keys
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: true
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-keys-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      excluded_episode_indices:
+      - 16
+      included_episode_indices:
+      - 2
+      - 4
+      - 12
+      - 13
+      - 18
+      - 22
+      - 24
+      - 29
+  - name: pick_anything__pick_orange_cup
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-orange-cup-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 0
+      - 3
+      - 5
+      - 11
+      - 14
+      - 16
+      - 17
+      - 27
+  - name: pick_anything__pick_pen
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-pen-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      task_text_filter: Pick up pen and put it on the plate
+      included_episode_indices:
+      - 1
+      - 4
+      - 6
+      - 10
+      - 11
+      - 13
+      - 15
+      - 27
+  - name: pick_anything__pick_pink_cup
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-pink-cup-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 1
+      - 7
+      - 14
+      - 16
+      - 20
+      - 21
+      - 22
+      - 29
+  - name: pick_anything__pick_tape
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-tape-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 3
+      - 4
+      - 6
+      - 8
+      - 14
+      - 17
+      - 21
+      - 25
+  - name: pick_anything__pick_tissue
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-tissue-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 5
+      - 7
+      - 10
+      - 11
+      - 15
+      - 16
+      - 21
+      - 25
+  - name: pick_anything__pick_watch
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-watch-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 5
+      - 10
+      - 11
+      - 16
+      - 17
+      - 18
+      - 27
+      - 29
+  - name: pick_anything__pick_water_bottle
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_anything/pick-water-bottle-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      included_episode_indices:
+      - 0
+      - 2
+      - 3
+      - 4
+      - 22
+      - 25
+      - 27
+      - 29
+  - name: pick_diverse_action__orange_lid
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: true
+    dataset_dir: /root/nas/piper_data/pick_diverse_action/orange-lid-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      task_text_filter: put the lid on the orange cup
+      included_episode_indices:
+      - 2
+      - 8
+      - 9
+      - 10
+      - 14
+      - 18
+      - 20
+      - 22
+      - 30
+      - 32
+      - 34
+      - 39
+      - 40
+  - name: pick_diverse_action__pick_calculator
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-calculator-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      task_text_filter: pick up the calculator and put it into plate
+      included_episode_indices:
+      - 2
+      - 4
+      - 6
+      - 9
+      - 15
+      - 18
+      - 19
+      - 30
+      - 31
+      - 37
+      - 40
+      - 42
+      - 46
+  - name: pick_diverse_action__pick_orange_cup
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-orange-cup-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      task_text_filter: Pick up orange cup and put it on the plate
+      included_episode_indices:
+      - 5
+      - 6
+      - 10
+      - 15
+      - 19
+      - 20
+      - 22
+      - 27
+      - 28
+      - 30
+      - 33
+      - 43
+      - 49
+  - name: pick_diverse_action__pick_pen
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-pen-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      task_text_filter: Pick up pen and put it on the plate
+      included_episode_indices:
+      - 3
+      - 4
+      - 5
+      - 7
+      - 18
+      - 19
+      - 24
+      - 25
+      - 26
+      - 28
+      - 34
+      - 35
+      - 37
+  - name: pick_diverse_action__press_calculator
+    type: lerobot_ola_v3
+    weight: 1.0
+    use_for_val: false
+    dataset_dir: /root/nas/piper_data/pick_diverse_action/press-calcultor-trim
+    max_episodes: null
+    image_aug: false
+    use_language_action: true
+    params:
+      state_key: observation.state
+      eef_state_key: observation.ee_pose
+      absolute_action_key: action.ee_pose
+      camera_keys:
+      - observation.images.right_front
+      - observation.images.left_wrist
+      - observation.images.right_wrist
+      gripper_closed_value: 0.0
+      gripper_open_value: 100.0
+      normalize_state: true
+      normalize_actions: true
+      normalization_mode: q01_q99
+      stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+      motus_dir_name: motus
+      video_backend: pyav
+      shard_cache_size: 2
+      excluded_episode_indices:
+      - 10
+      - 34
+      task_text_filter: press the calculator
+      included_episode_indices:
+      - 7
+      - 8
+      - 14
+      - 24
+      - 31
+      - 32
+      - 35
+      - 36
+      - 37
+      - 42
+      - 43
+      - 47
+  episode_subset:
+    requested_fraction: 0.25
+    seed: 42
+    selection_unit: episode
+    rounding: ceil
+    normalization_stats_path: /root/nas/piper_data/motus_mixtures/pick_anything_plus_diverse/stats.json
+    normalization_recomputed: false
+    datasets:
+    - name: pick_anything__pick_keys
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-keys-trim
+      source_episode_count: 30
+      eligible_episode_count: 29
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.27586206896551724
+      included_episode_indices:
+      - 2
+      - 4
+      - 12
+      - 13
+      - 18
+      - 22
+      - 24
+      - 29
+    - name: pick_anything__pick_orange_cup
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-orange-cup-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 0
+      - 3
+      - 5
+      - 11
+      - 14
+      - 16
+      - 17
+      - 27
+    - name: pick_anything__pick_pen
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-pen-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 1
+      - 4
+      - 6
+      - 10
+      - 11
+      - 13
+      - 15
+      - 27
+    - name: pick_anything__pick_pink_cup
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-pink-cup-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 1
+      - 7
+      - 14
+      - 16
+      - 20
+      - 21
+      - 22
+      - 29
+    - name: pick_anything__pick_tape
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-tape-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 3
+      - 4
+      - 6
+      - 8
+      - 14
+      - 17
+      - 21
+      - 25
+    - name: pick_anything__pick_tissue
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-tissue-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 5
+      - 7
+      - 10
+      - 11
+      - 15
+      - 16
+      - 21
+      - 25
+    - name: pick_anything__pick_watch
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-watch-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 5
+      - 10
+      - 11
+      - 16
+      - 17
+      - 18
+      - 27
+      - 29
+    - name: pick_anything__pick_water_bottle
+      dataset_dir: /root/nas/piper_data/pick_anything/pick-water-bottle-trim
+      source_episode_count: 30
+      eligible_episode_count: 30
+      selected_episode_count: 8
+      actual_fraction_of_eligible: 0.26666666666666666
+      included_episode_indices:
+      - 0
+      - 2
+      - 3
+      - 4
+      - 22
+      - 25
+      - 27
+      - 29
+    - name: pick_diverse_action__orange_lid
+      dataset_dir: /root/nas/piper_data/pick_diverse_action/orange-lid-trim
+      source_episode_count: 50
+      eligible_episode_count: 50
+      selected_episode_count: 13
+      actual_fraction_of_eligible: 0.26
+      included_episode_indices:
+      - 2
+      - 8
+      - 9
+      - 10
+      - 14
+      - 18
+      - 20
+      - 22
+      - 30
+      - 32
+      - 34
+      - 39
+      - 40
+    - name: pick_diverse_action__pick_calculator
+      dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-calculator-trim
+      source_episode_count: 50
+      eligible_episode_count: 50
+      selected_episode_count: 13
+      actual_fraction_of_eligible: 0.26
+      included_episode_indices:
+      - 2
+      - 4
+      - 6
+      - 9
+      - 15
+      - 18
+      - 19
+      - 30
+      - 31
+      - 37
+      - 40
+      - 42
+      - 46
+    - name: pick_diverse_action__pick_orange_cup
+      dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-orange-cup-trim
+      source_episode_count: 50
+      eligible_episode_count: 50
+      selected_episode_count: 13
+      actual_fraction_of_eligible: 0.26
+      included_episode_indices:
+      - 5
+      - 6
+      - 10
+      - 15
+      - 19
+      - 20
+      - 22
+      - 27
+      - 28
+      - 30
+      - 33
+      - 43
+      - 49
+    - name: pick_diverse_action__pick_pen
+      dataset_dir: /root/nas/piper_data/pick_diverse_action/pick-pen-trim
+      source_episode_count: 50
+      eligible_episode_count: 50
+      selected_episode_count: 13
+      actual_fraction_of_eligible: 0.26
+      included_episode_indices:
+      - 3
+      - 4
+      - 5
+      - 7
+      - 18
+      - 19
+      - 24
+      - 25
+      - 26
+      - 28
+      - 34
+      - 35
+      - 37
+    - name: pick_diverse_action__press_calculator
+      dataset_dir: /root/nas/piper_data/pick_diverse_action/press-calcultor-trim
+      source_episode_count: 50
+      eligible_episode_count: 48
+      selected_episode_count: 12
+      actual_fraction_of_eligible: 0.25
+      included_episode_indices:
+      - 7
+      - 8
+      - 14
+      - 24
+      - 31
+      - 32
+      - 35
+      - 36
+      - 37
+      - 42
+      - 43
+      - 47
+model:
+  flow_source:
+    mode: history
+    video_mode: gaussian
+    action_noise_std: 0.02
+    history_length: 48
+  future_video_noise_augmentation:
+    enabled: true
+    probability: 0.5
+    min_scale: 0.5
+    max_scale: 1.0
+    future_start_index: 1
+  wan:
+    config_path: ./pretrained_models/Wan2.2-TI2V-5B
+    checkpoint_path: ./pretrained_models/Wan2.2-TI2V-5B
+    vae_path: ./pretrained_models/Wan2.2-TI2V-5B/Wan2.2_VAE.pth
+    precision: bfloat16
+  vlm:
+    checkpoint_path: ./pretrained_models/Qwen3-VL-2B-Instruct
+    precision: bfloat16
+    frozen: false
+  action_expert:
+    hidden_size: 1024
+    ffn_dim_multiplier: 4
+    norm_eps: 1.0e-05
+  und_expert:
+    hidden_size: 512
+    ffn_dim_multiplier: 4
+    norm_eps: 1.0e-05
+    vlm:
+      input_dim: 2048
+      projector_type: mlp3x_silu
+  time_distribution:
+    timestep_sample_method: logit_normal
+    sigmoid_scale: 1.0
+    min_t: 0.0
+    max_t: 1.0
+  inference:
+    num_inference_timesteps: 10
+  loss_weights:
+    video_loss_weight: 1.0
+    action_loss_weight: 1.0
+  ema:
+    enabled: false
+    update_after_step: 0
+    inv_gamma: 1.0
+    power: 0.75
+    min_value: 0.0
+    max_value: 0.9999
+training:
+  batch_size: 5
+  gradient_accumulation_steps: 2
+  max_steps: 20000
+  learning_rate: 5.0e-05
+  weight_decay: 0.01
+  scheduler_type: linear
+  warmup_steps: 200
+  cycle_length: 5000000
+  f_max: 0.99
+  f_min: 0.4
+  grad_clip_norm: 0.5
+  use_amp: true
+  find_unused_parameters: false
+  train_lap: true
+system:
+  checkpoint_dir: ./checkpoints
+  log_level: INFO
+  log_interval: 1
+  save_interval: 5000
+  val_interval: 2000
+  num_workers: 8
+  pin_memory: true
+logging:
+  report_to: wandb
+  wandb_project: motus
+  tensorboard_log_dir: tensorboard_logs
+  run_name: null
+resume:
+  checkpoint_path: null
+  reset_scheduler: false
+finetune:
+  checkpoint_path: /root/nas/code/d0/pretrained_models/d0_v/mp_rank_00_model_states.pt

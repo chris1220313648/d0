@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -113,3 +114,125 @@ def test_dataset_factory_exposes_lerobot_robocoin_branch():
 
     assert "lerobot_robocoin" in source
     assert "LeRobotRoboCOINDataset" in source
+
+
+def test_robocoin_validation_targets_cover_selected_episode_ids_in_order():
+    from data.lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
+
+    dataset = object.__new__(LeRobotRoboCOINDataset)
+    dataset.task_mode = "multi"
+    dataset.repo_ids = ["task_b", "task_a"]
+    dataset.episode_ids = {"task_b": [2, 7], "task_a": [4]}
+
+    targets = dataset.validation_episode_targets()
+
+    assert [
+        (target.task, target.task_idx, target.episode_position, target.episode_index)
+        for target in targets
+    ] == [
+        ("task_b", 0, 0, 2),
+        ("task_b", 0, 1, 7),
+        ("task_a", 1, 0, 4),
+    ]
+
+
+def test_robocoin_blacklist_filters_training_and_validation_targets(tmp_path):
+    from data.lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
+
+    bad_path = tmp_path / "bad_episodes.jsonl"
+    bad_path.write_text(
+        json.dumps({"task": "task_b", "episode_index": 7, "status": "bad"}) + "\n",
+        encoding="utf-8",
+    )
+
+    dataset = object.__new__(LeRobotRoboCOINDataset)
+    dataset.task_mode = "multi"
+    dataset.repo_ids = ["task_b", "task_a"]
+    dataset.episode_ids = {"task_b": [2, 7], "task_a": [4]}
+    dataset.skip_bad_episodes = True
+    dataset.bad_episode_keys = dataset._load_bad_episode_keys(str(bad_path))
+
+    assert dataset.bad_episode_keys == {("task_b", 7)}
+    assert [
+        (target.task, target.episode_position, target.episode_index)
+        for target in dataset._filtered_episode_targets()
+    ] == [
+        ("task_b", 0, 2),
+        ("task_a", 0, 4),
+    ]
+    assert [
+        (target.task, target.episode_position, target.episode_index)
+        for target in dataset.validation_episode_targets()
+    ] == [
+        ("task_b", 0, 2),
+        ("task_a", 0, 4),
+    ]
+
+
+def test_calculate_sampling_indices_accepts_explicit_last_condition_frame():
+    from data.lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
+
+    dataset = object.__new__(LeRobotRoboCOINDataset)
+    dataset.action_chunk_size = 4
+    dataset.global_downsample_rate = 3
+    dataset.num_video_frames = 2
+    dataset.video_action_freq_ratio = 2
+
+    condition, video_indices, action_indices = dataset._calculate_sampling_indices(
+        total_frames=20,
+        condition_frame_idx="last",
+    )
+
+    assert condition == 7
+    assert action_indices == [10, 13, 16, 19]
+    assert video_indices == [13, 19]
+
+
+def test_random_getitem_delegates_to_explicit_episode_loader(monkeypatch):
+    from data.lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
+
+    dataset = object.__new__(LeRobotRoboCOINDataset)
+    dataset.task_mode = "multi"
+    dataset.lerobot_dataset = type("Media", (), {"num_episodes": 3})()
+    dataset.episode_id_to_task_idx = [0, 0, 1]
+    dataset.episode_num_accumulated = [2, 3]
+    calls = []
+
+    monkeypatch.setattr("data.lerobot.lerobot_robocoin_dataset.random.randint", lambda *_: 2)
+    dataset.load_episode_sample = lambda task_idx, episode_position, condition_frame_idx=None: calls.append(
+        (task_idx, episode_position, condition_frame_idx)
+    ) or {"ok": torch.tensor(True)}
+
+    sample = dataset[123]
+
+    assert bool(sample["ok"])
+    assert calls == [(1, 0, None)]
+
+
+def test_random_getitem_retries_then_uses_fallback(monkeypatch):
+    from data.lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset, RoboCOINEpisodeTarget
+
+    dataset = object.__new__(LeRobotRoboCOINDataset)
+    dataset.lerobot_dataset = type("Media", (), {"num_episodes": 2})()
+    dataset.sample_retry_attempts = 1
+    dataset.sample_fallback_attempts = 2
+    dataset._sample_episode_targets = [
+        RoboCOINEpisodeTarget("bad_task", 0, 0, 10),
+        RoboCOINEpisodeTarget("good_task", 1, 0, 20),
+    ]
+    calls = []
+
+    monkeypatch.setattr("data.lerobot.lerobot_robocoin_dataset.random.randint", lambda *_: 0)
+
+    def load_episode_sample(task_idx, episode_position, condition_frame_idx=None):
+        calls.append((task_idx, episode_position))
+        if task_idx == 0:
+            raise RuntimeError("decode failed")
+        return {"ok": torch.tensor(True)}
+
+    dataset.load_episode_sample = load_episode_sample
+
+    sample = dataset[0]
+
+    assert bool(sample["ok"])
+    assert calls == [(0, 0), (0, 0), (1, 0)]

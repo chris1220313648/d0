@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 import warnings
+from contextlib import nullcontext
 
 import debugpy
 # try:
@@ -45,6 +46,12 @@ from models.motus import Motus, MotusConfig
 from data.dataset import create_dataset, collate_fn
 from utils.scheduler import create_scheduler
 from sample import evaluate_model, log_evaluation_metrics
+try:
+    from train.gradient_accumulation import backward_and_step
+except ModuleNotFoundError:
+    # ``torchrun train/train.py`` places the train directory, not its parent
+    # package, first on sys.path.
+    from gradient_accumulation import backward_and_step
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +253,7 @@ class UniDiffuserTrainer:
         try:
             from omegaconf import OmegaConf as _OmegaConf
             cfg_dict = _OmegaConf.to_container(self.config, resolve=True) if self.config is not None else {}
+            _OmegaConf.save(_OmegaConf.create(cfg_dict), checkpoint_dir / "training_config.yaml")
             # Filter only requested sections
             common = cfg_dict.get("common", {})
             model = cfg_dict.get("model", {})
@@ -262,6 +270,14 @@ class UniDiffuserTrainer:
             with open(checkpoint_dir / "config.json", "w") as f:
                 _json.dump(filtered, f, indent=2)
             logger.info(f"Wrote config.json to {checkpoint_dir}")
+            deployment = cfg_dict.get("deployment")
+            if deployment:
+                deployment = dict(deployment)
+                deployment["version"] = 1
+                deployment["config"] = "training_config.yaml"
+                with open(checkpoint_dir / "deployment.yaml", "w") as f:
+                    yaml.safe_dump(deployment, f, sort_keys=False)
+                logger.info(f"Wrote deployment.yaml to {checkpoint_dir}")
         except Exception as e:
             logger.warning(f"Failed to write config.json: {e}")
     
@@ -354,10 +370,9 @@ class UniDiffuserTrainer:
             current_lr = self.optimizer.param_groups[0]['lr']
             logger.info(f"Current learning rate after checkpoint load (optimizer): {current_lr:.2e}")
     
-    def train_step(self, batch: Dict[str, Any]) -> Dict[str, float]:
-        """Single training step for UniDiffuser."""
+    def train_step(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, Dict[str, float]]:
+        """Compute and return one micro-batch loss without updating parameters."""
         self.model.train()
-        self.optimizer.zero_grad()
         
         first_frame = batch['first_frame'].to(self.device, dtype=self.dtype)          # [B, C, H, W]
         video_frames = batch['video_frames'].to(self.device, dtype=self.dtype)        # [B, num_video_frames, C, H, W]
@@ -404,26 +419,10 @@ class UniDiffuserTrainer:
         total_loss = loss_dict['total_loss']
         # print("loss_dict :",loss_dict)
         
-        # Backward pass (using accelerator if available)
-        if hasattr(self, 'accelerator') and self.accelerator is not None:
-            self.accelerator.backward(total_loss)
-        else:
-            total_loss.backward()
-        
-        # Gradient clipping
-        grad_clip_norm = self.config.training.grad_clip_norm if hasattr(self.config.training, 'grad_clip_norm') else 1.0
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=grad_clip_norm)
-        
-        # Optimizer step
-        self.optimizer.step()
-        
-        if self.scheduler:
-            self.scheduler.step()
-        
         # Convert to float for logging
         metrics = {k: v.item() if torch.is_tensor(v) else v for k, v in loss_dict.items()}
-        
-        return metrics
+
+        return total_loss, metrics
     
     def train(self, max_steps: int, resume_from: Optional[str] = None, val_interval: int = 500, reset_scheduler: Optional[bool] = None):
         """
@@ -447,13 +446,25 @@ class UniDiffuserTrainer:
             
             self.load_checkpoint(resume_from, reset_scheduler=reset_scheduler)
         
-        logger.info(f"Starting UniDiffuser training for {max_steps} steps")
+        accumulation_steps = int(self.config.training.get('gradient_accumulation_steps', 1))
+        if accumulation_steps <= 0:
+            raise ValueError("training.gradient_accumulation_steps must be positive")
+        effective_batch_size = int(self.config.training.batch_size) * int(self.world_size) * accumulation_steps
+        logger.info(
+            f"Starting UniDiffuser training for {max_steps} optimizer steps "
+            f"(micro_batch_per_gpu={self.config.training.batch_size}, world_size={self.world_size}, "
+            f"gradient_accumulation_steps={accumulation_steps}, effective_batch_size={effective_batch_size})"
+        )
         
         start_time = time.time()
         
         # Step-based training loop
         data_iter = iter(self.train_dataloader)
         epoch = 0
+        update_start_time = time.time()
+        accumulated_metrics: Dict[str, float] = {}
+        accumulated_metric_counts: Dict[str, int] = {}
+        self.optimizer.zero_grad()
         
         while self.global_step < max_steps:
             try:
@@ -469,12 +480,48 @@ class UniDiffuserTrainer:
             if batch is None:  # Handle None batches
                 continue
                 
-            step_start_time = time.time()
+            accumulation_context = (
+                self.accelerator.accumulate(self.model)
+                if self.accelerator is not None
+                else nullcontext()
+            )
+            with accumulation_context:
+                total_loss, micro_metrics = self.train_step(batch)
+                grad_clip_norm = (
+                    self.config.training.grad_clip_norm
+                    if hasattr(self.config.training, 'grad_clip_norm')
+                    else 1.0
+                )
+                is_update_step = backward_and_step(
+                    loss=total_loss,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    scheduler=self.scheduler,
+                    accelerator=self.accelerator,
+                    grad_clip_norm=float(grad_clip_norm),
+                )
 
-            # Training step
-            metrics = self.train_step(batch)
-            
-            step_time = time.time() - step_start_time
+            for key, value in micro_metrics.items():
+                if value is None:
+                    continue
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+                accumulated_metrics[key] = accumulated_metrics.get(key, 0.0) + numeric_value
+                accumulated_metric_counts[key] = accumulated_metric_counts.get(key, 0) + 1
+
+            if not is_update_step:
+                continue
+
+            metrics = {
+                key: value / accumulated_metric_counts[key]
+                for key, value in accumulated_metrics.items()
+            }
+            accumulated_metrics.clear()
+            accumulated_metric_counts.clear()
+            step_time = time.time() - update_start_time
+            update_start_time = time.time()
             self.global_step += 1
             
             # Logging
@@ -544,8 +591,22 @@ class UniDiffuserTrainer:
         total_time = time.time() - start_time
         if self.rank == 0:
             logger.info(f"UniDiffuser training completed in {total_time:.2f}s ({self.global_step} steps)")
-            if self.save_final_checkpoint:
-                self.save_checkpoint()
+
+        # Accelerator/DeepSpeed checkpointing is collective: every rank must
+        # enter save_checkpoint(). Avoid saving the same step twice when the
+        # final step has already hit the periodic save interval.
+        final_step_already_saved = (
+            self.save_interval > 0
+            and self.global_step % self.save_interval == 0
+        )
+        if self.save_final_checkpoint and not final_step_already_saved:
+            self.save_checkpoint()
+        elif self.rank == 0:
+            if final_step_already_saved:
+                logger.info(
+                    "Skipping final checkpoint save because the final step "
+                    "was already saved by the periodic checkpoint."
+                )
             else:
                 logger.info("Skipping final checkpoint save")
 
@@ -579,6 +640,7 @@ def create_model_and_optimizer(config: OmegaConf) -> tuple:
         batch_size=config.training.batch_size,
         video_loss_weight=config.model.loss_weights.video_loss_weight,
         action_loss_weight=config.model.loss_weights.action_loss_weight,
+        vlm_loss_weight=config.model.loss_weights.get('vlm_loss_weight', 1.0),
         flow_source_mode=config.model.get('flow_source', {}).get('mode', 'gaussian'),
         flow_source_video_mode=config.model.get('flow_source', {}).get(
             'video_mode',
@@ -760,12 +822,22 @@ def main():
         config.logging.wandb_project = args.wandb_project
     if args.run_name is not None:
         config.logging.run_name = args.run_name
-    # Decide backbone loading policy:
-    # If resuming or finetuning from a pretrain checkpoint, skip loading WAN/VLM pretrained weights.
+    # Decide backbone loading policy. A finetune checkpoint normally supplies
+    # both backbones, but a VLM-specific opt-out must keep the configured VLM
+    # pretrained weights available before the partial checkpoint load.
     try:
-        if (getattr(config.resume, 'checkpoint_path', None) or
-            (hasattr(config, 'finetune') and getattr(config.finetune, 'checkpoint_path', None))):
-            config.model.load_pretrained_backbones = False
+        resume_ckpt = getattr(config.resume, 'checkpoint_path', None)
+        finetune_ckpt = (
+            getattr(config.finetune, 'checkpoint_path', None)
+            if hasattr(config, 'finetune')
+            else None
+        )
+        preserve_configured_vlm = bool(
+            finetune_ckpt
+            and not getattr(config.model.vlm, 'load_from_finetune_checkpoint', True)
+        )
+        if resume_ckpt or finetune_ckpt:
+            config.model.load_pretrained_backbones = preserve_configured_vlm
     except Exception:
         pass
     
@@ -853,7 +925,13 @@ def main():
         if getattr(config, 'training_mode', 'finetune') == 'finetune' and finetune_ckpt:
             logger.info(f"Loading finetune weights from {finetune_ckpt} (partial)...")
             try:
-                model.load_pretrain_weights(finetune_ckpt)
+                load_vlm_weights = bool(
+                    getattr(config.model.vlm, 'load_from_finetune_checkpoint', True)
+                )
+                model.load_pretrain_weights(
+                    finetune_ckpt,
+                    load_vlm_weights=load_vlm_weights,
+                )
                 logger.info("Finetune weights loaded (partial).")
             except Exception as e:
                 logger.error(f"Failed to load finetune weights: {e}")

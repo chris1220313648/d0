@@ -339,7 +339,13 @@ class LeRobotMotusDataset(data.Dataset):
             else:
                 raise ValueError(f"Invalid task name: {self.task_name}")
             metas = [LeRobotDatasetMetadata(task_name, root=os.path.join(self.root, task_name)) for task_name in self.repo_ids]
-            self.episode_ids = {task_name: list(range(int(meta.total_episodes))) for task_name, meta in zip(self.repo_ids, metas)}
+            self.episode_ids = {
+                task_name: list(range(int(meta.total_episodes)))
+                for task_name, meta in zip(self.repo_ids, metas)
+            }
+            if self.max_episodes is not None and self.max_episodes > 0:
+                self.episode_ids = self._limit_multi_episode_ids(self.episode_ids, int(self.max_episodes))
+                self.repo_ids = [task_name for task_name in self.repo_ids if self.episode_ids.get(task_name)]
 
         
         
@@ -451,6 +457,7 @@ class LeRobotMotusDataset(data.Dataset):
         required = task_discovery.get("required", ["meta/info.json", "data", "videos"])
         if isinstance(required, str):
             required = [required]
+        validate_episodes = bool(task_discovery.get("validate_episodes", False))
 
         task_names: List[str] = []
         for path in root_path.rglob("*"):
@@ -458,13 +465,78 @@ class LeRobotMotusDataset(data.Dataset):
                 continue
             if suffix and not path.name.endswith(suffix):
                 continue
-            if all((path / str(rel_path)).exists() for rel_path in required):
+            if not all((path / str(rel_path)).exists() for rel_path in required):
+                continue
+            if validate_episodes and not LeRobotMotusDataset._has_complete_local_episodes(path):
+                logger.warning("Skipping incomplete local LeRobot task: %s", path)
+                continue
+            else:
                 task_names.append(path.relative_to(root_path).as_posix())
 
         task_names = sorted(task_names)
         if not task_names:
             raise ValueError(f"No LeRobot datasets discovered under {root_path} with suffix {suffix!r}")
         return task_names
+
+    @staticmethod
+    def _has_complete_local_episodes(path: Path) -> bool:
+        info_path = path / "meta" / "info.json"
+        episodes_path = path / "meta" / "episodes.jsonl"
+        if not info_path.is_file() or not episodes_path.is_file():
+            return False
+
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read LeRobot info.json for %s: %s", path, exc)
+            return False
+
+        data_pattern = info.get("data_path", "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
+        chunks_size = int(info.get("chunks_size", 1000) or 1000)
+
+        try:
+            with episodes_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    episode = json.loads(line)
+                    episode_index = int(episode["episode_index"])
+                    episode_chunk = episode_index // chunks_size
+                    rel_path = str(data_pattern).format(
+                        episode_index=episode_index,
+                        episode_chunk=episode_chunk,
+                    )
+                    if not (path / rel_path).is_file():
+                        return False
+        except Exception as exc:
+            logger.warning("Failed to validate LeRobot episodes for %s: %s", path, exc)
+            return False
+
+        return True
+
+    @staticmethod
+    def _limit_multi_episode_ids(
+        episode_ids: Dict[str, List[int]],
+        max_episodes: int,
+    ) -> Dict[str, List[int]]:
+        if max_episodes <= 0:
+            return episode_ids
+
+        all_pairs: List[Tuple[str, int]] = [
+            (task_name, episode_id)
+            for task_name, ids in episode_ids.items()
+            for episode_id in ids
+        ]
+        rng = random.Random(0)
+        rng.shuffle(all_pairs)
+        selected_pairs = all_pairs[: min(max_episodes, len(all_pairs))]
+
+        limited: Dict[str, List[int]] = {}
+        for task_name, episode_id in selected_pairs:
+            limited.setdefault(task_name, []).append(episode_id)
+        for ids in limited.values():
+            ids.sort()
+        return limited
 
     def _episodes_jsonl_path(self) -> Path:
         if self.lerobot_dataset is None:
@@ -863,52 +935,37 @@ class LeRobotMotusDataset(data.Dataset):
                 raise KeyError("episode_index not found in item; cannot load external embedding")
             ep_index = int(ep_index_raw.item()) if hasattr(ep_index_raw, "item") else int(ep_index_raw)
 
-            cached = self._episode_embedding_cache.get(ep_index, None)
-            if cached is None:
-                if self.task_mode == 'single':
-                    ep_meta = self.lerobot_dataset.meta.episodes.get(ep_index, None)
+            if self.task_mode == 'single':
+                ep_meta = self.lerobot_dataset.meta.episodes.get(ep_index, None)
+            else:
+                ep_meta = self.lerobot_dataset._datasets[task_idx].meta.episodes.get(ep_index, None)
+            if ep_meta is None:
+                raise KeyError(f"episode {ep_index} not found in meta.episodes")
+
+            rel_path = ep_meta.get("t5_embedding_path", None)
+            if rel_path is None:
+                if not self.enable_t5_fallback:
+                    raise KeyError(
+                        "language_embedding not found in item and t5_embedding_path not found in meta/episodes.jsonl; "
+                        "you can set enable_t5_fallback=True to encode and cache T5 embeddings on-the-fly."
+                    )
+
+                instr = item_cond.get("language_instruction", None)
+                if instr is None or (isinstance(instr, str) and len(instr.strip()) == 0):
+                    instr = item_cond.get("task", "")
+                if not isinstance(instr, str):
+                    instr = str(instr)
+                all_embeddings = self._encode_and_cache_t5_embedding(ep_index, instr)
+            else:
+                if self.task_mode == "single":
+                    abs_path = Path(self.lerobot_dataset.root) / str(rel_path)
                 else:
-                    ep_meta = self.lerobot_dataset._datasets[task_idx].meta.episodes.get(ep_index, None)
-                if ep_meta is None:
-                    raise KeyError(f"episode {ep_index} not found in meta.episodes")
-
-                rel_path = ep_meta.get("t5_embedding_path", None)
-                if rel_path is None:
-                    if not self.enable_t5_fallback:
-                        raise KeyError(
-                            "language_embedding not found in item and t5_embedding_path not found in meta/episodes.jsonl; "
-                            "you can set enable_t5_fallback=True to encode and cache T5 embeddings on-the-fly."
-                        )
-
-                    # On-the-fly encoding (use language_instruction, fallback to task)
-                    instr = item_cond.get("language_instruction", None)
-                    if instr is None or (isinstance(instr, str) and len(instr.strip()) == 0):
-                        instr = item_cond.get("task", "")
-                    if not isinstance(instr, str):
-                        instr = str(instr)
-                    emb = self._encode_and_cache_t5_embedding(ep_index, instr)
-                    self._episode_embedding_cache[ep_index] = emb if isinstance(emb, torch.Tensor) else torch.tensor(emb)
-                    cached = self._episode_embedding_cache[ep_index]
-                    all_embeddings = cached
-                    # Skip the load-from-disk branch below
-                    rel_path = None
-
-                if rel_path is not None:
-                    # dataset root is self.lerobot_dataset.root (Path)
-                    if self.task_mode == "single":
-                        abs_path = Path(self.lerobot_dataset.root) / str(rel_path)
-                    else:
-                        abs_path = Path(self.lerobot_dataset._datasets[task_idx].root) / str(rel_path)
-                    emb = torch.load(abs_path, map_location="cpu")
-                    if not isinstance(emb, torch.Tensor):
-                        emb = torch.tensor(emb)
-                    # normalize shape to [V,S,D]
-                    if emb.ndim == 2:
-                        emb = emb.unsqueeze(0)
-                    self._episode_embedding_cache[ep_index] = emb
-                    cached = emb
-
-            all_embeddings = cached
+                    abs_path = Path(self.lerobot_dataset._datasets[task_idx].root) / str(rel_path)
+                all_embeddings = torch.load(abs_path, map_location="cpu")
+                if not isinstance(all_embeddings, torch.Tensor):
+                    all_embeddings = torch.tensor(all_embeddings)
+                if all_embeddings.ndim == 2:
+                    all_embeddings = all_embeddings.unsqueeze(0)
 
         if not isinstance(all_embeddings, torch.Tensor):
             all_embeddings = torch.tensor(all_embeddings)
@@ -937,21 +994,38 @@ class LeRobotMotusDataset(data.Dataset):
             'vlm_inputs': vlm_tokens,
         }
 
-    def _resize_frame_chw(self, frame_chw: torch.Tensor, target_size: Tuple[int, int]) -> torch.Tensor:
-        """Resize and pad a [C,H,W] torch float frame to target_size=(H,W), keeping [0,1]."""
+    def _resize_frame_chw_uint8(self, frame_chw: torch.Tensor, target_size: Tuple[int, int]) -> np.ndarray:
+        """Resize a CHW frame to uint8 HWC without materializing a full-size float copy.
+
+        Video decoders normally return uint8 frames.  Keeping that representation
+        until after resize is important in DataLoader workers, where a source
+        frame can be much larger than Motus's 384x320 training resolution.
+        """
         if frame_chw.dim() != 3:
             raise ValueError(f"Expected frame [C,H,W], got {tuple(frame_chw.shape)}")
-        c, h, w = frame_chw.shape
+        _, h, w = frame_chw.shape
         th, tw = target_size
+
+        frame_hwc = frame_chw.permute(1, 2, 0).cpu().numpy()
+        if frame_hwc.dtype == np.uint8:
+            frame_uint8 = frame_hwc
+        else:
+            frame_uint8 = np.clip(frame_hwc * 255.0, 0, 255).astype(np.uint8)
         if (h, w) == (th, tw):
-            return frame_chw
-        frame_hwc = frame_chw.permute(1, 2, 0).cpu().numpy()  # float32 [H,W,C] in [0,1]
-        frame_uint8 = np.clip(frame_hwc * 255.0, 0, 255).astype(np.uint8)
-        resized = resize_with_padding(frame_uint8, target_size)  # uint8 [th,tw,3]
+            return frame_uint8
+        return resize_with_padding(frame_uint8, target_size)  # uint8 [th,tw,3]
+
+    def _resize_frame_chw(self, frame_chw: torch.Tensor, target_size: Tuple[int, int]) -> torch.Tensor:
+        """Resize and pad a CHW frame to float32 [0,1] at target_size=(H,W)."""
+        resized = self._resize_frame_chw_uint8(frame_chw, target_size)
         out = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
         return out
     
-    def _calculate_sampling_indices(self, total_frames: int) -> Tuple[int, List[int], List[int]]:
+    def _calculate_sampling_indices(
+        self,
+        total_frames: int,
+        condition_frame_idx: Optional[int | str] = None,
+    ) -> Tuple[int, List[int], List[int]]:
         """
         Calculate sampling indices for video and actions (following robotwin's logic).
         
@@ -970,10 +1044,20 @@ class LeRobotMotusDataset(data.Dataset):
         # Ensure the last action doesn't exceed total_frames - 1
         max_condition_idx = total_frames - physical_chunk_size - 1
         
-        if max_condition_idx < 0:
-            condition_frame_idx = 0
+        if condition_frame_idx is None:
+            if max_condition_idx < 0:
+                condition_frame_idx = 0
+            else:
+                condition_frame_idx = random.randint(0, max_condition_idx)
+        elif condition_frame_idx == "last":
+            condition_frame_idx = max(max_condition_idx, 0)
         else:
-            condition_frame_idx = random.randint(0, max_condition_idx)
+            condition_frame_idx = int(condition_frame_idx)
+            if condition_frame_idx < 0 or condition_frame_idx > max(max_condition_idx, 0):
+                raise ValueError(
+                    "condition_frame_idx must be within the legal sampling range: "
+                    f"got {condition_frame_idx}, max={max(max_condition_idx, 0)}"
+                )
         
         # Action indices: from condition_frame_idx+1 onwards, with downsampling
         action_indices = []

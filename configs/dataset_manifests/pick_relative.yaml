@@ -1,0 +1,39 @@
+version: 1
+collection_name: pick_relative
+root: /root/nas/piper_data/pick_relative
+normalization_stats_path: /root/nas/piper_data/pick_relative/motus_shared/stats.json
+datasets:
+  - name: pick_orange_cup_left
+    path: pick-orange-cup-left-trim
+    weight: 1.0
+    use_for_val: true
+  - name: pick_orange_cup_right
+    path: pick-orange-cup-right-trim
+    weight: 1.0
+  - name: pick_pen_left
+    path: pick-pen-left-trim
+    weight: 1.0
+  - name: pick_pen_right
+    path: pick-pen-right-trim
+    weight: 1.0
+  - name: pick_tissue_left
+    path: pick-tissue-left-trim
+    weight: 1.0
+  - name: pick_tissue_right
+    path: pick-tissue-right-trim
+    weight: 1.0
+  - name: pick_watch_left
+    path: pick-watch-left-trim
+    weight: 1.0
+  - name: pick_watch_right
+    path: pick-watch-right-trim
+    weight: 1.0
+  - name: pick_water_bottle_left
+    path: pick-water-bottle-left-trim
+    weight: 1.0
+  - name: pick_water_bottle_right
+    path: pick-water-bottle-right-trim
+    weight: 1.0
+  - name: pick_water_bottle
+    path: pick-water-bottle-trim
+    weight: 1.0

@@ -15,7 +15,27 @@ def create_dataset(config: OmegaConf, val: bool = False):
     if dataset_type == 'multi':
         return _create_multi_dataset(config, val=val)
 
-    return _create_single_dataset(config, val=val)
+    dataset = _create_single_dataset(config, val=val)
+    return _maybe_wrap_canonical_dataset(dataset, config, dataset_type)
+
+
+def _maybe_wrap_canonical_dataset(dataset: Dataset, config: OmegaConf, dataset_type: str) -> Dataset:
+    canonical_format = config.dataset.get('canonical_format', None)
+    if canonical_format is None:
+        return dataset
+
+    from .canonical55 import Canonical55Dataset, should_use_canonical55
+
+    if should_use_canonical55(str(canonical_format)):
+        normalization = config.dataset.get('canonical_normalization', None)
+        if normalization is not None:
+            normalization = OmegaConf.to_container(normalization, resolve=True)
+        return Canonical55Dataset(
+            dataset,
+            dataset_type=str(dataset_type),
+            normalization=normalization,
+        )
+    raise ValueError(f"Unsupported canonical_format: {canonical_format}")
 
 
 class MultiDataset(Dataset):
@@ -82,10 +102,24 @@ class MultiDataset(Dataset):
                 'history_action_sequence',
             )
 
+        original_state_dim = None
         if sample.get('initial_state') is not None:
+            original_state_dim = sample['initial_state'].shape[-1]
             sample['initial_state'] = _pad_last_dim(sample['initial_state'], self.target_state_dim, 'initial_state')
         else:
             sample['initial_state'] = torch.zeros(self.target_state_dim, dtype=sample['action_sequence'].dtype)
+
+        if sample.get('state_mask') is not None:
+            sample['state_mask'] = _pad_last_dim(
+                sample['state_mask'].to(dtype=torch.bool),
+                self.target_state_dim,
+                'state_mask',
+            )
+        elif sample.get('initial_state') is not None:
+            state_mask = torch.zeros_like(sample['initial_state'], dtype=torch.bool)
+            if original_state_dim is not None:
+                state_mask[..., :original_state_dim] = True
+            sample['state_mask'] = state_mask
 
         return sample
 
@@ -123,7 +157,9 @@ def _create_multi_dataset(config: OmegaConf, val: bool = False) -> MultiDataset:
         child_config = _build_child_config(config, child_dataset_config)
         child_weight = float(child_dataset_config.get('weight', 1.0))
 
-        datasets.append(_create_single_dataset(child_config, val=val))
+        child_dataset_type = child_config.dataset.get('type', 'robotwin')
+        child_dataset = _create_single_dataset(child_config, val=val)
+        datasets.append(_maybe_wrap_canonical_dataset(child_dataset, child_config, child_dataset_type))
         names.append(str(child_name))
         weights.append(child_weight)
 
@@ -147,6 +183,8 @@ def _build_child_config(config: OmegaConf, child_dataset_config: OmegaConf) -> O
     child_dataset_dict.pop('name', None)
     child_dataset_dict.pop('weight', None)
     child_dataset_dict.pop('use_for_val', None)
+    if hasattr(config.dataset, 'canonical_format') and 'canonical_format' not in child_dataset_dict:
+        child_dataset_dict['canonical_format'] = config.dataset.canonical_format
 
     child_config.dataset = OmegaConf.create(child_dataset_dict)
     if child_common:
@@ -287,6 +325,8 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['dataset_dir'] = [str(p) for p in dataset_dir]
         if hasattr(config.dataset, 'max_episodes'):
             params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
         if hasattr(config.dataset, 'image_aug'):
             params['image_aug'] = config.dataset.image_aug and not val
 
@@ -401,6 +441,8 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['task_name'] = config.dataset.task_name
         if hasattr(config.dataset, 'max_episodes'):
             params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
         if hasattr(config.dataset, 'image_aug'):
             params['image_aug'] = config.dataset.image_aug and not val
 
@@ -442,8 +484,24 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['task_name'] = config.dataset.task_name
         if hasattr(config.dataset, 'max_episodes'):
             params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
         if hasattr(config.dataset, 'image_aug'):
             params['image_aug'] = config.dataset.image_aug and not val
+        if hasattr(config.dataset, 'normalize_actions'):
+            params['normalize_actions'] = config.dataset.normalize_actions
+        if hasattr(config.dataset, 'stats_path'):
+            params['stats_path'] = config.dataset.stats_path
+        if hasattr(config.dataset, 'stats_key'):
+            params['stats_key'] = config.dataset.stats_key
+        if hasattr(config.dataset, 'enable_setup_control_suffix'):
+            params['enable_setup_control_suffix'] = config.dataset.enable_setup_control_suffix
+        if hasattr(config.dataset, 'setup_text'):
+            params['setup_text'] = config.dataset.setup_text
+        if hasattr(config.dataset, 'action_signal'):
+            params['action_signal'] = config.dataset.action_signal
+        elif hasattr(config.dataset, 'action_stats_signal'):
+            params['action_signal'] = config.dataset.action_stats_signal
 
         # Add VLM checkpoint path
         if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
@@ -461,6 +519,52 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         params['val'] = val
 
         return LeRobotAgiBotDataset(**params)
+
+    elif dataset_type == 'lerobot_agibot_lazy':
+        from .lerobot.lerobot_lazy_dataset import LazyLeRobotAgiBotDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+        if hasattr(config.dataset, 'normalize_actions'):
+            params['normalize_actions'] = config.dataset.normalize_actions
+        if hasattr(config.dataset, 'stats_path'):
+            params['stats_path'] = config.dataset.stats_path
+        if hasattr(config.dataset, 'stats_key'):
+            params['stats_key'] = config.dataset.stats_key
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+
+        params['val'] = val
+
+        return LazyLeRobotAgiBotDataset(**params)
 
     elif dataset_type == 'lerobot_robocoin':
         from .lerobot.lerobot_robocoin_dataset import LeRobotRoboCOINDataset
@@ -499,6 +603,213 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         params['val'] = val
 
         return LeRobotRoboCOINDataset(**params)
+
+    elif dataset_type == 'lerobot_robocoin_lazy':
+        from .lerobot.lerobot_lazy_dataset import LazyLeRobotRoboCOINDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+
+        params['val'] = val
+
+        return LazyLeRobotRoboCOINDataset(**params)
+
+    elif dataset_type == 'lerobot_interndata':
+        from .lerobot.lerobot_interndata_dataset import LeRobotInternDataDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+        if hasattr(config.dataset, 'normalize_actions'):
+            params['normalize_actions'] = config.dataset.normalize_actions
+        if hasattr(config.dataset, 'enable_setup_control_suffix'):
+            params['enable_setup_control_suffix'] = config.dataset.enable_setup_control_suffix
+        if hasattr(config.dataset, 'setup_text'):
+            params['setup_text'] = config.dataset.setup_text
+        if hasattr(config.dataset, 'action_signal'):
+            params['action_signal'] = config.dataset.action_signal
+        elif hasattr(config.dataset, 'action_stats_signal'):
+            params['action_signal'] = config.dataset.action_stats_signal
+
+        params['val'] = val
+
+        return LeRobotInternDataDataset(**params)
+
+    elif dataset_type == 'lerobot_interndata_lazy':
+        from .lerobot.lerobot_lazy_dataset import LazyLeRobotInternDataDataset
+
+        params = {}
+
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'task_mode'):
+            params['task_mode'] = config.dataset.task_mode
+        if hasattr(config.dataset, 'task_name'):
+            params['task_name'] = config.dataset.task_name
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+
+        if hasattr(config.dataset, 'params'):
+            additional_params = OmegaConf.to_object(config.dataset.params)
+            params.update(additional_params)
+
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+        if hasattr(config.dataset, 'normalize_actions'):
+            params['normalize_actions'] = config.dataset.normalize_actions
+
+        params['val'] = val
+
+        return LazyLeRobotInternDataDataset(**params)
+
+    elif dataset_type == 'lerobot_ola_v3':
+        from .lerobot.lerobot_ola_v3_dataset import LeRobotOLAV3Dataset
+
+        params = {}
+        if hasattr(config, 'common'):
+            params.update({
+                'global_downsample_rate': config.common.global_downsample_rate,
+                'video_action_freq_ratio': config.common.video_action_freq_ratio,
+                'num_video_frames': config.common.num_video_frames,
+                'video_size': (config.common.video_height, config.common.video_width),
+            })
+        if hasattr(config.dataset, 'dataset_dir'):
+            params['dataset_dir'] = config.dataset.dataset_dir
+        if hasattr(config.dataset, 'max_episodes'):
+            params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'image_aug'):
+            params['image_aug'] = config.dataset.image_aug and not val
+        if hasattr(config.dataset, 'use_language_action'):
+            params['use_language_action'] = config.dataset.use_language_action
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+        if hasattr(config.dataset, 'params'):
+            params.update(OmegaConf.to_object(config.dataset.params))
+        flow_source = config.model.get('flow_source', {})
+        params['include_history_actions'] = flow_source.get('mode', 'gaussian') == 'history'
+        params['history_action_length'] = int(
+            flow_source.get(
+                'history_length',
+                config.common.num_video_frames * config.common.video_action_freq_ratio,
+            )
+        )
+        params['val'] = val
+        return LeRobotOLAV3Dataset(**params)
+
+    elif dataset_type == 'libero':
+        from .libero.libero_dataset import LiberoMotusDataset
+
+        params = {
+            'dataset_dir': config.dataset.dataset_dir,
+            'cache_dir': config.dataset.cache_dir,
+            'action_stats_path': config.dataset.action_stats_path,
+            'global_downsample_rate': config.common.global_downsample_rate,
+            'video_action_freq_ratio': config.common.video_action_freq_ratio,
+            'num_video_frames': config.common.num_video_frames,
+            'video_size': (config.common.video_height, config.common.video_width),
+            'target_action_dim': config.common.action_dim,
+            'val': val,
+        }
+        for name in (
+            'val_fraction',
+            'split_seed',
+            'max_episodes',
+            'use_language_action',
+            'require_cache',
+            'normalize_actions',
+            'image_aug',
+            'lap_subdir',
+        ):
+            if hasattr(config.dataset, name):
+                value = getattr(config.dataset, name)
+                if name == 'image_aug':
+                    value = value and not val
+                params[name] = value
+        if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
+            params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
+        flow_source = config.model.get('flow_source', {})
+        params['include_history_actions'] = flow_source.get('mode', 'gaussian') == 'history'
+        params['history_action_length'] = int(
+            flow_source.get(
+                'history_length',
+                config.common.num_video_frames * config.common.video_action_freq_ratio,
+            )
+        )
+        if hasattr(config.dataset, 'params'):
+            params.update(OmegaConf.to_object(config.dataset.params))
+        return LiberoMotusDataset(**params)
 
     elif dataset_type == 'bridge':
         from .bridge.bridge_dataset import BridgeDataset
@@ -711,7 +1022,7 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         return ImageQADataset(**params)
     
     else:
-        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, lerobot_agibot, lerobot_robocoin, latent_action, egoverse_trimodal, image_qa")
+        raise ValueError(f"Unknown dataset type: {dataset_type}. Available types: robotwin, bridge, fractal_bridge, droid, droid_bridge, ac_one, aloha_agilex_2, lerobot, lerobot_agibot, lerobot_agibot_lazy, lerobot_robocoin, lerobot_robocoin_lazy, lerobot_interndata, lerobot_interndata_lazy, lerobot_ola_v3, latent_action, egoverse_trimodal, image_qa")
 
 
 def _process_vlm_inputs_batch(vlm_inputs: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
@@ -871,6 +1182,8 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
     )
     has_action_mask = all(('action_mask' in sample and sample['action_mask'] is not None) for sample in batch)
     action_masks = torch.stack([sample['action_mask'] for sample in batch]) if has_action_mask else None
+    has_state_mask = all(('state_mask' in sample and sample['state_mask'] is not None) for sample in batch)
+    state_masks = torch.stack([sample['state_mask'] for sample in batch]) if has_state_mask else None
     has_video_mask = any(('video_mask' in sample and sample['video_mask'] is not None) for sample in batch)
     video_masks = None
     if has_video_mask:
@@ -887,6 +1200,7 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
     has_initial_state = all(('initial_state' in sample and sample['initial_state'] is not None) for sample in batch)
     initial_states = torch.stack([sample['initial_state'] for sample in batch]) if has_initial_state else None
     dataset_names = [sample.get('dataset_name') for sample in batch]
+    canonical_formats = [sample.get('canonical_format') for sample in batch]
     
     # Process VLM inputs with padding in collate_fn
     vlm_inputs = [sample.get('vlm_inputs') for sample in batch]
@@ -914,6 +1228,8 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
 
     if action_masks is not None:
         result['action_mask'] = action_masks
+    if state_masks is not None:
+        result['state_mask'] = state_masks
     if video_masks is not None:
         result['video_mask'] = video_masks
     if history_action_sequences is not None:
@@ -922,5 +1238,7 @@ def collate_fn(batch: List[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]
         result['initial_state'] = initial_states
     if any(name is not None for name in dataset_names):
         result['dataset_name'] = dataset_names
+    if any(fmt is not None for fmt in canonical_formats):
+        result['canonical_format'] = canonical_formats
     
     return result

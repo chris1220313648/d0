@@ -1,0 +1,9 @@
+version: 1
+mixture_name: pick_all_history
+collections:
+  - ../dataset_manifests/pick_anything.yaml
+  - ../dataset_manifests/pick_diverse_action.yaml
+  - ../dataset_manifests/pick_relative.yaml
+normalization:
+  mode: q01_q99
+  stats_path: /root/nas/piper_data/motus_mixtures/pick_all_history/stats.json
