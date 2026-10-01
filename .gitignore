@@ -1,5 +1,12 @@
 .vscode
 
+# Local repositories, pretrained models, and experiment logs
+/OLA-Sem/
+/pretrained_models/
+/RoboTwin
+/wandb/
+/XPolicyLab/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

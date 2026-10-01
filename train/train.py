@@ -501,6 +501,18 @@ class UniDiffuserTrainer:
                     grad_clip_norm=float(grad_clip_norm),
                 )
 
+            if self.config.system.get('audit_batches', False):
+                import json
+                audit_dir = Path(self.config.system.audit_dir)
+                audit_dir.mkdir(parents=True, exist_ok=True)
+                with (audit_dir / f'rank{self.rank}_batches.jsonl').open('a') as stream:
+                    stream.write(json.dumps(dict(step=self.global_step,
+                        batch_size=int(batch['action_sequence'].shape[0]),
+                        datasets=batch.get('dataset_name'),
+                        loss=float(total_loss.detach()),
+                        cuda_peak_bytes=torch.cuda.max_memory_allocated(),
+                        metrics=micro_metrics)) + '\n')
+
             for key, value in micro_metrics.items():
                 if value is None:
                     continue

@@ -283,6 +283,8 @@ class LeRobotOLAV3Dataset(Dataset):
         state_key: str = "observation.state",
         eef_state_key: str = "observation.ee_pose",
         absolute_action_key: str = "action.ee_pose",
+        action_representation: str = "delta_eef",
+        joint_action_key: str = "action",
         camera_keys: Sequence[str] = DEFAULT_CAMERA_KEYS,
         gripper_closed_value: float = 0.0,
         gripper_open_value: float = 100.0,
@@ -325,6 +327,10 @@ class LeRobotOLAV3Dataset(Dataset):
         self.state_key = str(state_key)
         self.eef_state_key = str(eef_state_key)
         self.absolute_action_key = str(absolute_action_key)
+        self.action_representation = str(action_representation)
+        if self.action_representation not in {"delta_eef", "absolute_joint"}:
+            raise ValueError(f"Unsupported OLA action_representation={self.action_representation!r}")
+        self.joint_action_key = str(joint_action_key)
         self.camera_keys = tuple(str(key) for key in camera_keys)
         if len(self.camera_keys) != 3:
             raise ValueError("OLA camera_keys must contain [right_front, left_wrist, right_wrist]")
@@ -420,11 +426,12 @@ class LeRobotOLAV3Dataset(Dataset):
 
     def _validate_features(self) -> None:
         features = self.info.get("features", {})
-        expected = {
-            self.state_key: 14,
-            self.eef_state_key: 16,
-            self.absolute_action_key: 16,
-        }
+        expected = {self.state_key: 14}
+        if self.action_representation == "absolute_joint":
+            expected[self.joint_action_key] = 14
+        else:
+            expected[self.eef_state_key] = 16
+            expected[self.absolute_action_key] = 16
         errors = []
         for key, dim in expected.items():
             feature = features.get(key)
@@ -478,6 +485,11 @@ class LeRobotOLAV3Dataset(Dataset):
                 f"OLA stats file not found: {path}. Run data/lerobot/prepare_ola_v3_motus.py first."
             )
         stats = self._read_json(path)
+        stats_representation = stats.get("action_representation")
+        if self.action_representation == "absolute_joint" and stats_representation != "absolute_joint":
+            raise ValueError(f"OLA joint action requires absolute_joint stats: {path}")
+        if stats_representation is not None and stats_representation != self.action_representation:
+            raise ValueError(f"OLA stats action representation mismatch: {path}")
         if self.normalization_mode == "minmax":
             low_key, high_key = "min", "max"
         elif self.normalization_mode in {"q01_q99", "quantile"}:
@@ -522,15 +534,11 @@ class LeRobotOLAV3Dataset(Dataset):
 
         import pyarrow.parquet as pq
 
-        columns = [
-            self.state_key,
-            self.eef_state_key,
-            self.absolute_action_key,
-            "timestamp",
-            "frame_index",
-            "episode_index",
-            "task_index",
-        ]
+        columns = [self.state_key, "timestamp", "frame_index", "episode_index", "task_index"]
+        if self.action_representation == "absolute_joint":
+            columns.append(self.joint_action_key)
+        else:
+            columns.extend((self.eef_state_key, self.absolute_action_key))
         table = pq.read_table(self._data_file_path(episode), columns=columns, memory_map=True)
         shard = _ShardData(table, columns)
         self._shard_cache[cache_key] = shard
@@ -694,14 +702,21 @@ class LeRobotOLAV3Dataset(Dataset):
             gripper_closed_value=self.gripper_closed_value,
             gripper_open_value=self.gripper_open_value,
         )
-        measured_eef = _as_float_tensor(rows[self.eef_state_key][action_indices])
-        commanded_eef = _as_float_tensor(rows[self.absolute_action_key][action_indices])
-        action_sequence = absolute_eef_to_relative_rpy(
-            measured_eef,
-            commanded_eef,
-            gripper_closed_value=self.gripper_closed_value,
-            gripper_open_value=self.gripper_open_value,
-        )
+        if self.action_representation == "absolute_joint":
+            action_sequence = normalize_joint_grippers(
+                _as_float_tensor(rows[self.joint_action_key][action_indices]),
+                gripper_closed_value=self.gripper_closed_value,
+                gripper_open_value=self.gripper_open_value,
+            )
+        else:
+            measured_eef = _as_float_tensor(rows[self.eef_state_key][action_indices])
+            commanded_eef = _as_float_tensor(rows[self.absolute_action_key][action_indices])
+            action_sequence = absolute_eef_to_relative_rpy(
+                measured_eef,
+                commanded_eef,
+                gripper_closed_value=self.gripper_closed_value,
+                gripper_open_value=self.gripper_open_value,
+            )
         if self.normalize_state:
             initial_state = _linear_normalize(initial_state, self.state_lower, self.state_upper)
         if self.normalize_actions:
@@ -710,12 +725,19 @@ class LeRobotOLAV3Dataset(Dataset):
         history_action_sequence = None
         if self.include_history_actions:
             history_indices = self._history_indices(condition)
-            history_action_sequence = absolute_eef_to_relative_rpy(
-                _as_float_tensor(rows[self.eef_state_key][history_indices]),
-                _as_float_tensor(rows[self.absolute_action_key][history_indices]),
-                gripper_closed_value=self.gripper_closed_value,
-                gripper_open_value=self.gripper_open_value,
-            )
+            if self.action_representation == "absolute_joint":
+                history_action_sequence = normalize_joint_grippers(
+                    _as_float_tensor(rows[self.joint_action_key][history_indices]),
+                    gripper_closed_value=self.gripper_closed_value,
+                    gripper_open_value=self.gripper_open_value,
+                )
+            else:
+                history_action_sequence = absolute_eef_to_relative_rpy(
+                    _as_float_tensor(rows[self.eef_state_key][history_indices]),
+                    _as_float_tensor(rows[self.absolute_action_key][history_indices]),
+                    gripper_closed_value=self.gripper_closed_value,
+                    gripper_open_value=self.gripper_open_value,
+                )
             if self.normalize_actions:
                 history_action_sequence = _linear_normalize(
                     history_action_sequence,

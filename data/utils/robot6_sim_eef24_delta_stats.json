@@ -1,0 +1,631 @@
+{
+  "schema_version": 1,
+  "method": "source_minmax_0_1",
+  "datasets": {
+    "cosmos": {
+      "layout": {
+        "action": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "state": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "raw_dims": [
+          12,
+          9
+        ]
+      },
+      "episodes": 1199,
+      "frames": 316995,
+      "tasks": [
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CloseDoubleDoor",
+          "episodes": 47,
+          "manifest_sha256": "bf5a20d96f715b10ece5430118d4332366529af39408c76acd238a95e3020d69"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CloseDrawer",
+          "episodes": 54,
+          "manifest_sha256": "2533a5226ed1289d9c6e353c90220473d676ef017c9b9d9d3faac6613bb06a6a"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CloseSingleDoor",
+          "episodes": 54,
+          "manifest_sha256": "cd001a3dedf11fe14dc73812fd0b41acfd0f12db1c18b1b6bc53ac1321184387"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CoffeePressButton",
+          "episodes": 54,
+          "manifest_sha256": "a5b7b7d5e9b79eeb88d87ea503c012b6fbfa2a2131eb816acd23b0b7726f1c50"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CoffeeServeMug",
+          "episodes": 49,
+          "manifest_sha256": "3b4e0dd061067f03286e8b2a46d29f391cd69db93f1a9980e13af5d2900dd7c2"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/CoffeeSetupMug",
+          "episodes": 43,
+          "manifest_sha256": "9f3911af741dde24858a2510445ed806c4d75a85f8323655c40dc2a84585f99b"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/OpenDoubleDoor",
+          "episodes": 50,
+          "manifest_sha256": "1ddea2473616a37379c7467f51ec64e324bc84cb01c744fb19b93f3e1f4d43b9"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/OpenDrawer",
+          "episodes": 54,
+          "manifest_sha256": "988bad0b02578cc690c8a1dc47057f864c219502b3a82cba62f7d99fd395153d"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/OpenSingleDoor",
+          "episodes": 53,
+          "manifest_sha256": "385ab00ed3e244796cb043f685604827444d3ef5488f62490fd34d7d5ba65e4e"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPCabToCounter",
+          "episodes": 51,
+          "manifest_sha256": "1e3aafd1602891af67c0d58e236da78b0629edda97ee947bc86bea33c2de89c2"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPCounterToCab",
+          "episodes": 53,
+          "manifest_sha256": "d030234d0f1b04d0c03d2503d537483f81a9284442525ce37b729f07b87ce4d5"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPCounterToMicrowave",
+          "episodes": 49,
+          "manifest_sha256": "194fcb2ab9f1ea1755e7779a9e20b0f36b07734cdeaf5d3594a440b49da2ec91"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPCounterToSink",
+          "episodes": 51,
+          "manifest_sha256": "a055c2647fe33c0ef50539d6cc1736d988f6752ccf5db7ebe697b6ff75481bf6"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPCounterToStove",
+          "episodes": 48,
+          "manifest_sha256": "1df31694fa65c19c6d42937e18466cc9506a07167c2c973978767ec17e131677"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPMicrowaveToCounter",
+          "episodes": 52,
+          "manifest_sha256": "256caee5cf7a78124cfaa45fab162f15cb481324d21b0971e9fa39c9a45c24ea"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPSinkToCounter",
+          "episodes": 53,
+          "manifest_sha256": "adb91947b31e8e45058ee95c892fa6fd86ac673db28709e04601920d990fbd6b"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/PnPStoveToCounter",
+          "episodes": 53,
+          "manifest_sha256": "25daf872cf7eb74bf16a99119da0ef5edec2f55abe8e1b6982f217d54905e64b"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOffMicrowave",
+          "episodes": 52,
+          "manifest_sha256": "e47f2ebec493cd47f86e0d8fb088d5095567bd004380983dddcaedfa9631eb67"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOffSinkFaucet",
+          "episodes": 50,
+          "manifest_sha256": "f07c17ca45bbf1a8a9f7d18ac62807e255465f918fb8a0d3419e7ec5415b7be5"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOffStove",
+          "episodes": 39,
+          "manifest_sha256": "01633064af7857295214b3324bb257942dfa3fbb40051edf0bc5f11c9e184ac9"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOnMicrowave",
+          "episodes": 52,
+          "manifest_sha256": "75e0dd7507b8c7213a7798e0e84a5737602142fad8542b4e283effbce496e39a"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOnSinkFaucet",
+          "episodes": 40,
+          "manifest_sha256": "15ff94a3d3fc12c29f24fb9ab8616e3630b8b381e33730ac523fde76bce1d303"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnOnStove",
+          "episodes": 44,
+          "manifest_sha256": "e42dddba88e3800aa36f94419d8bb05b732a287a018961bce372db7ab755643d"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/RoboCasa-Cosmos-Policy_lerobot_v21/TurnSinkSpout",
+          "episodes": 54,
+          "manifest_sha256": "4b689222a45c4f7ca30f086bcfc87d4b17b6ccf8a63a19e8eff6c609c9906537"
+        }
+      ],
+      "action": {
+        "min": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -0.8942857384681702,
+          -0.8914285898208618,
+          -1.0
+        ],
+        "max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.8971428275108337,
+          1.0
+        ]
+      },
+      "state": {
+        "min": [
+          -2.1247687339782715,
+          -1.77293860912323,
+          -2.6203815937042236,
+          -3.079496383666992,
+          -2.899484872817993,
+          0.1421038657426834,
+          -2.9032814502716064,
+          -0.002119274577125907,
+          -0.04623180627822876
+        ],
+        "max": [
+          2.9000072479248047,
+          1.4232503175735474,
+          2.409480094909668,
+          -0.05035127326846123,
+          2.9064910411834717,
+          3.7708184719085693,
+          2.9093987941741943,
+          0.04337916150689125,
+          0.004925135988742113
+        ]
+      }
+    },
+    "xemb": {
+      "layout": {
+        "action": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "state": [
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          21,
+          22
+        ],
+        "raw_dims": [
+          12,
+          53
+        ]
+      },
+      "episodes": 70469,
+      "frames": 19626036,
+      "tasks": [
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CloseDoubleDoor",
+          "episodes": 3000,
+          "manifest_sha256": "b73f1596c99709d59c0d5038ae3064e0d132b27f135d5914cf900c1a424e2895"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CloseDrawer",
+          "episodes": 3000,
+          "manifest_sha256": "06f9a8a248a150e2e974ad84afa35d7c0401b3f7bd62212d58d426b8682a323e"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CloseSingleDoor",
+          "episodes": 2999,
+          "manifest_sha256": "ae606e008d7e744d52a6656b6765d964eb40c7f39e98ca9e245d13318aa3793f"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CoffeePressButton",
+          "episodes": 3000,
+          "manifest_sha256": "65d66e36fe6a9a54218cbfffb4501b0baaedc13c5b3c65c5ddab99efa03d5e05"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CoffeeServeMug",
+          "episodes": 3000,
+          "manifest_sha256": "551d915d076cf9fc33c28ed232a13bb02fa9eaed9c5d18bcba76deacd9f7fdcc"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.CoffeeSetupMug",
+          "episodes": 3000,
+          "manifest_sha256": "0c38694fce1613a87b7baf86602b145daf33a964a69febf4cca194102171db44"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.OpenDoubleDoor",
+          "episodes": 1496,
+          "manifest_sha256": "8631995c92816df320d9ddc54f51f3a88ca4d1bcffe3d020db6ed75f8e32f382"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.OpenDrawer",
+          "episodes": 3000,
+          "manifest_sha256": "e9405ef308f211143d7ff1211e745edceb54b0695bebc92af1575cc53ccc3d24"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.OpenSingleDoor",
+          "episodes": 3000,
+          "manifest_sha256": "3b55e2193acd0a1e932f899f61b47365d165bb67a9adfcd6af9ae07a7c1a3cee"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPCabToCounter",
+          "episodes": 3011,
+          "manifest_sha256": "5a3ced8c9242ef8b38cd3a440e24a61d5670f75a5918fdd3bb6cebcee77f5c8c"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPCounterToCab",
+          "episodes": 3000,
+          "manifest_sha256": "787e07f10ffb24e1e009205b5a797631ecdbb348e958f85e5abd61ac9848523d"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPCounterToMicrowave",
+          "episodes": 3000,
+          "manifest_sha256": "d5bb246a7692f06c0ee23f052e78247e482858e0c6b61faa2fcaaaf981049281"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPCounterToSink",
+          "episodes": 2999,
+          "manifest_sha256": "b66154582172c9f2803a5bf0c043bb3d9a468ff8b2541f803385a2dc3073b7cd"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPCounterToStove",
+          "episodes": 2999,
+          "manifest_sha256": "bce56626f0417777e236431d80a8ffd63ba00747fc9a67c2e733a400ca38c1ae"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPMicrowaveToCounter",
+          "episodes": 2998,
+          "manifest_sha256": "4e30947fd5a39014e090a373c76ca292c2dea107142d5956e164401f10dd1166"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPSinkToCounter",
+          "episodes": 3000,
+          "manifest_sha256": "caa2f4a0e94e53cfc5caa49a585effdf93dbf442cb1998134674e0ac895ab544"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.PnPStoveToCounter",
+          "episodes": 3000,
+          "manifest_sha256": "18be90b164c498cc4c6a7987ed7bd2ae67ccac8ecf7227ad82acbb990d746325"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOffMicrowave",
+          "episodes": 3000,
+          "manifest_sha256": "9179f39e26ebba384793b88b56e6ed3f0435024b0f50464d27fc21cb838531df"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOffSinkFaucet",
+          "episodes": 3000,
+          "manifest_sha256": "c0127e7b9d1972dda19571e6da9de58d8acd60b7508863b5395ef9a435e0da38"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOffStove",
+          "episodes": 3000,
+          "manifest_sha256": "ab3c91710daa277eb0d13ffa9b25db464cdd2bd7270bcfc25872214d58d613bc"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOnMicrowave",
+          "episodes": 3000,
+          "manifest_sha256": "40da1a05b78df67f6942b06f08eb78ebeb5f57a66651de7e5d4969f00ed260c8"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOnSinkFaucet",
+          "episodes": 3000,
+          "manifest_sha256": "7ffb62b86ff05fcce3f653630975daa543bdee537e5ca6da5b48ee67b6c75c58"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnOnStove",
+          "episodes": 3000,
+          "manifest_sha256": "d7ac6eac3e4364435c6ebbff0599301d7bfd11ba0a8468dfd5e41e62135f49b3"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim_v21/single_panda_gripper.TurnSinkSpout",
+          "episodes": 2967,
+          "manifest_sha256": "1bd01e9e0ceaa1b6b0dbcec3ec3eed5678b9416010c744f095ef6a13e792ce62"
+        }
+      ],
+      "action": {
+        "min": [
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          -1.0,
+          0.0
+        ],
+        "max": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "state": {
+        "min": [
+          -2.9072665625385694,
+          -1.7821346962651234,
+          -2.9019549635693203,
+          -3.0950995498663234,
+          -2.9379135084191494,
+          -0.0009604569934214373,
+          -2.9283660511219174,
+          -0.03470893813267074,
+          -0.1288750901176726
+        ],
+        "max": [
+          2.914743505093099,
+          1.7686904561055032,
+          2.9164948248792224,
+          -0.016307060196326453,
+          2.9393729013302186,
+          3.790846051472469,
+          2.954829522854034,
+          0.09939525808816335,
+          0.12181679495218971
+        ]
+      }
+    },
+    "gr1_eef24_delta": {
+      "layout": {
+        "action": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23
+        ],
+        "state": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28
+        ],
+        "raw_dims": [
+          24,
+          44
+        ],
+        "action_transform": "consecutive_target_base_rotvec_v1"
+      },
+      "episodes": 17999,
+      "frames": 4480196,
+      "tasks": [
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPBottleToCabinetClose",
+          "episodes": 1000,
+          "manifest_sha256": "89d4e3a9fa9849a08b69bb49c95c38b8df6417bd86dd8d2a1ce4c8e1361d68bc"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPCanToDrawerClose",
+          "episodes": 1000,
+          "manifest_sha256": "5f8a8b32cead9b465881847f47ce3f29a6bccc0b5ef6a22b9193cf48edb56e98"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPCupToDrawerClose",
+          "episodes": 1000,
+          "manifest_sha256": "a4c2177a96c9a70ae11d1f6025a6c7e9ce23b64c6066338aba10042a5c9672fa"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPMilkToMicrowaveClose",
+          "episodes": 1000,
+          "manifest_sha256": "c2009c971afb16b7c15aa5ce087fbd86534bb4ed713231530d41af48e7dee09e"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPPotatoToMicrowaveClose",
+          "episodes": 1000,
+          "manifest_sha256": "778c7baac65bdebe3073312fbb160b91a8f84b57ba7bb246253bfbb44bd94bdc"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PnPWineToCabinetClose",
+          "episodes": 1000,
+          "manifest_sha256": "6945fd618abc78664536ce1bbb881493f889cfb91cafebfce335c9fa7420133d"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromCuttingboardToBasketSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "cf0de1b5f6797df7814d0d7e1311eba0a30819de87f1559a150cefb7592b512a"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromCuttingboardToCardboardboxSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "a0410f78297df68b77e15eba41e107599c6d7f59eb3327668c41341272f9c005"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromCuttingboardToPanSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "e53d7f9a60c58c7727cdbeea7b0e4c056864cb3f3171b78cc318c3beb3139345"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromCuttingboardToPotSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "4060895aa254014057f5733bd5ab20b70eb1345ee07de74b4830833a620b180b"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromCuttingboardToTieredbasketSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "e3de5782d2dbdbb8b94590f300d6eddbc214919b39bad3ce54a439caaabb1ff9"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlacematToBasketSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "03dc66b40a1ac1a3d125b253675f174e39cf4eb973d3d38919a8411ae7f0ad84"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlacematToBowlSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "9f37a84b053dd0700018b014597d9c1b7dc7b53dfca56409d75a9c39abdf31e4"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlacematToPlateSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "9ef668e85c4dff3db684158327cad32a28ccb390aac735413be3f9b165fa0032"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlacematToTieredshelfSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "32d6f446acc994a8ae67aea77e0ca82a82b7f8d9e4b4cc8f55d1bfae00a10e15"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlateToBowlSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "970ad2f48126edef9bce1b3c8007a9a33fffedbb3c71674734457b64773cff59"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlateToCardboardboxSplitA",
+          "episodes": 1000,
+          "manifest_sha256": "81119478a112697b3118a1f346e6d5feb6f2ebb192596466359728a92521cce0"
+        },
+        {
+          "root": "/root/nas/code/d0/data/robot_data/PhysicalAI-Robotics-GR00T-Teleop-Sim/LeRobot_v21_eef24/gr1_unified.PosttrainPnPNovelFromPlateToPanSplitA",
+          "episodes": 999,
+          "manifest_sha256": "39d4e08f1ed56d66510533d332c41678b58b8df42ee0ce542f401dd1ad81ef85"
+        }
+      ],
+      "action": {
+        "min": [
+          -0.05000007152557373,
+          -0.05000007152557373,
+          -0.05000007152557373,
+          -3.097311496734619,
+          -2.572228193283081,
+          -2.8122620582580566,
+          -0.050000011920928955,
+          -0.050000011920928955,
+          -0.050000011920928955,
+          -3.0039565563201904,
+          -2.8776092529296875,
+          -2.001275062561035,
+          -1.5,
+          -1.5,
+          -1.5,
+          -1.5,
+          -3.0,
+          0.0,
+          -1.5,
+          -1.5,
+          -1.5,
+          -1.5,
+          -3.0,
+          0.0
+        ],
+        "max": [
+          0.05000007152557373,
+          0.05000004172325134,
+          0.050000011920928955,
+          3.077441692352295,
+          2.800692081451416,
+          2.649188756942749,
+          0.050000011920928955,
+          0.050000011920928955,
+          0.050000011920928955,
+          3.082571029663086,
+          2.852703809738159,
+          2.269925832748413,
+          1.5,
+          1.5,
+          1.5,
+          1.5,
+          3.0,
+          3.0,
+          1.5,
+          1.5,
+          1.5,
+          1.5,
+          3.0,
+          3.0
+        ]
+      },
+      "state": {
+        "min": [
+          -3.0000793807444635,
+          -0.0685905062295751,
+          -2.8468537677860937,
+          -2.5321154992117374,
+          -2.9998818915255763,
+          -1.4522682127917819,
+          -1.5008385769150343,
+          -3.0000557100806557,
+          -3.0020047514930304,
+          -3.0012415721992562,
+          -2.550382148411877,
+          -3.0007765498912065,
+          -1.5029526248746374,
+          -1.4922929204020177
+        ],
+        "max": [
+          2.367631776231531,
+          3.000217338810367,
+          3.000215377200945,
+          0.0537761346309435,
+          3.002241604598741,
+          1.5062487187650642,
+          1.5005564899154753,
+          2.9252771198243903,
+          0.012013324918075443,
+          2.9065297060750734,
+          0.005466616003821161,
+          3.0007471303170643,
+          1.4343486690980947,
+          1.5013123277551663
+        ]
+      }
+    }
+  }
+}

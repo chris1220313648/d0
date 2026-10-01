@@ -581,7 +581,7 @@ class Motus(nn.Module):
             self.vlm_model = Qwen3VLForConditionalGeneration.from_pretrained(
                 config.vlm_checkpoint_path,
                 dtype=self.dtype,
-                device_map="cuda",
+                device_map={"": torch.cuda.current_device()},
                 trust_remote_code=True
             )
             logger.info("Load pretrained VLM...")

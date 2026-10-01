@@ -130,6 +130,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=9883)
+    parser.add_argument("--benchmark-mode", choices=("plus", "original"), default="plus")
     parser.add_argument("--task-suite-name", choices=("libero_spatial", "libero_object", "libero_goal", "libero_10"), required=True)
     parser.add_argument("--num-trials-per-task", type=int, default=50)
     parser.add_argument("--max-tasks", type=int, default=-1)
@@ -152,12 +153,14 @@ def parse_args() -> argparse.Namespace:
 
 def empty_results(
     suite_name: str,
+    benchmark_mode: str,
     start_task: int,
     end_task: int,
     task_count: int,
 ) -> dict:
     return {
         "suite": suite_name,
+        "benchmark_mode": benchmark_mode,
         "selection": {
             "start_task": start_task,
             "end_task": end_task,
@@ -174,6 +177,7 @@ def load_resume_results(
     results_path: Path,
     suite,
     suite_name: str,
+    benchmark_mode: str,
     classification: dict,
     expected_task_ids: list[int],
     num_trials_per_task: int,
@@ -184,6 +188,11 @@ def load_resume_results(
     if results.get("suite") != suite_name:
         raise ValueError(
             f"Resume suite mismatch: file={results.get('suite')!r}, requested={suite_name!r}"
+        )
+    if results.get("benchmark_mode", "plus") != benchmark_mode:
+        raise ValueError(
+            "Resume benchmark mode mismatch: "
+            f"file={results.get('benchmark_mode', 'plus')!r}, requested={benchmark_mode!r}"
         )
     tasks = results.get("tasks")
     if not isinstance(tasks, list):
@@ -263,6 +272,12 @@ def main() -> None:
     np.random.seed(args.seed)
 
     suite = benchmark.get_benchmark_dict()[args.task_suite_name]()
+    if args.benchmark_mode == "original" and suite.n_tasks != 10:
+        raise ValueError(
+            "Original LIBERO mode requires the official 10-task suite registry, "
+            f"but {args.task_suite_name} contains {suite.n_tasks} tasks. "
+            "Check LIBERO_HOME/PYTHONPATH and use the official LIBERO repository."
+        )
     task_count = suite.n_tasks if args.max_tasks <= 0 else min(args.max_tasks, suite.n_tasks)
     start_task = int(args.start_task)
     end_task = task_count if args.end_task < 0 else int(args.end_task)
@@ -288,17 +303,30 @@ def main() -> None:
         task_count,
         suite.n_tasks,
     )
-    libero_home = Path(os.environ.get("LIBERO_HOME", ""))
-    classification_path = libero_home / "libero" / "libero" / "benchmark" / "task_classification.json"
-    with classification_path.open("r", encoding="utf-8") as handle:
-        classification_rows = json.load(handle)[args.task_suite_name]
-    classification = {int(row["id"]): row for row in classification_rows}
+    if args.benchmark_mode == "plus":
+        libero_home = Path(os.environ.get("LIBERO_HOME", ""))
+        classification_path = (
+            libero_home / "libero" / "libero" / "benchmark" / "task_classification.json"
+        )
+        with classification_path.open("r", encoding="utf-8") as handle:
+            classification_rows = json.load(handle)[args.task_suite_name]
+        classification = {int(row["id"]): row for row in classification_rows}
+    else:
+        classification = {
+            task_id + 1: {
+                "id": task_id + 1,
+                "name": str(suite.get_task(task_id).name),
+                "category": "original",
+            }
+            for task_id in range(suite.n_tasks)
+        }
     results_path = output_dir / "results.json"
     if args.resume and results_path.exists():
         results, start_task_id = load_resume_results(
             results_path=results_path,
             suite=suite,
             suite_name=args.task_suite_name,
+            benchmark_mode=args.benchmark_mode,
             classification=classification,
             expected_task_ids=selected_task_ids,
             num_trials_per_task=args.num_trials_per_task,
@@ -313,6 +341,7 @@ def main() -> None:
     else:
         results = empty_results(
             args.task_suite_name,
+            benchmark_mode=args.benchmark_mode,
             start_task=start_task,
             end_task=end_task,
             task_count=task_count,

@@ -537,3 +537,15 @@ def test_lerobot_multi_episode_limit_keeps_deterministic_nonempty_tasks():
         },
         max_episodes=5,
     )
+
+
+def test_lerobot_multi_episode_limit_per_task_skips_excluded_episodes():
+    from data.lerobot.lerobot_dataset import LeRobotMotusDataset
+
+    limited = LeRobotMotusDataset._limit_multi_episode_ids_per_task(
+        {"task_a": [0, 1, 2], "task_b": [0, 1]},
+        max_episodes_per_task=1,
+        excluded_episode_keys={("task_a", 0)},
+    )
+
+    assert limited == {"task_a": [1], "task_b": [0]}

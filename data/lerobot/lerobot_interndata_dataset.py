@@ -10,6 +10,8 @@ import torch
 
 from lerobot.datasets.video_utils import decode_video_frames
 
+from data.utils.per_task_norm import PerTaskNormalizer
+
 from data.canonical55 import (
     ARM_JOINT,
     BASE,
@@ -516,6 +518,11 @@ class LeRobotInternDataDataset(LeRobotMotusDataset):
         language_action_dir_name: str = "language_action",
         use_language_action: bool = True,
         normalize_actions: bool = False,
+        normalize_state: bool = False,
+        normalization_scope: str = "dataset",
+        normalization_mode: str = "q01_q99",
+        stats_path: Optional[str] = None,
+        stats_key: str = "interndata",
         output_format: str = "canonical55",
         enable_setup_control_suffix: bool = False,
         setup_text: str = "InternData robot with gripper",
@@ -526,9 +533,21 @@ class LeRobotInternDataDataset(LeRobotMotusDataset):
         self.output_format = str(output_format)
         if self.output_format not in {"canonical55", "dual_eef14_joint14"}:
             raise ValueError(f"Unsupported InternData output_format: {self.output_format}")
-        if normalize_actions:
-            raise ValueError("LeRobotInternDataDataset emits canonical55 tensors; external normalization is not supported.")
+        if (normalize_actions or normalize_state) and (
+            self.output_format != "dual_eef14_joint14" or normalization_scope != "per_task"
+        ):
+            raise ValueError(
+                "InternData normalization requires output_format='dual_eef14_joint14' "
+                "and normalization_scope='per_task'."
+            )
         super().__init__(*args, **kwargs)
+        self.normalize_actions = bool(normalize_actions)
+        self.normalize_state = bool(normalize_state)
+        self.per_task_normalizer = None
+        if self.normalize_actions or self.normalize_state:
+            if stats_path is None:
+                raise ValueError("InternData per-task normalization requires stats_path")
+            self.per_task_normalizer = PerTaskNormalizer(stats_path, str(stats_key), normalization_mode)
         self.use_language_action = bool(use_language_action)
         self.enable_setup_control_suffix = bool(enable_setup_control_suffix)
         self.setup_text = str(setup_text)
@@ -592,6 +611,15 @@ class LeRobotInternDataDataset(LeRobotMotusDataset):
             initial_state = initial_state[0]
             state_mask = state_mask[0]
             action_sequence, action_mask = build_interndata_dual_eef14_joint14(action_batch, prefix="actions")
+            task_key = self.repo_ids[int(task_idx)] if self.task_mode == "multi" else self.repo_id
+            if self.normalize_state:
+                initial_state = self.per_task_normalizer.normalize(
+                    task_key, "state", initial_state, state_mask
+                )
+            if self.normalize_actions:
+                action_sequence = self.per_task_normalizer.normalize(
+                    task_key, "action", action_sequence, action_mask
+                )
         else:
             initial_state, state_mask = build_interndata_canonical55(state_columns, prefix="states")
             if not state_mask.any():

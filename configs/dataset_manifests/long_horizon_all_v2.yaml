@@ -1,0 +1,116 @@
+version: 1
+collection_name: long_horizon_all_v2
+root: /root/nas/piper_data
+normalization_stats_path: /root/nas/piper_data/motus_shared/long_horizon_all_v2_stats.json
+datasets:
+  - name: charging_cable_middle_1
+    path: long_horizon/charging-cable-middle-1-trim-3
+    weight: 5
+    use_for_val: true
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_2
+    path: long_horizon/charging-cable-middle-2-trim
+    weight: 15
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_3
+    path: long_horizon/charging-cable-middle-trim-3
+    weight: 18
+    task_text: Tidy up the desk.
+  - name: keys_middle
+    path: long_horizon/keys-middle-trim
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_2a
+    path: long_horizon/measuring-tape-middle-trim-2
+    weight: 18
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_4
+    path: "long_horizon_1/charging-cable‑middle-2-trim-2"
+    weight: 10
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_3
+    path: "long_horizon_1/measuring‑tape‑middle-trim-3"
+    weight: 30
+    task_text: Tidy up the desk.
+  - name: tape_middle_1
+    path: "long_horizon_1/tape‑middle-1-trim-2"
+    weight: 30
+    task_text: Tidy up the desk.
+  - name: tape_middle_2
+    path: "long_horizon_1/tape‑middle-trim-2"
+    weight: 7
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_5
+    path: long_horizon_2/charging-cable-middle-trim
+    weight: 5
+    task_text: Tidy up the desk.
+  - name: key_middle_2
+    path: long_horizon_2/key-middle-trim-2
+    weight: 6
+    task_text: Tidy up the desk.
+  - name: keys_middle_7
+    path: long_horizon_2/keys-middle-trim-7
+    weight: 21
+    excluded_episode_indices: [0, 7]
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_space
+    path: "long_horizon_2/measuring tape -middle-trim"
+    weight: 4
+    excluded_episode_indices: [1]
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_2b
+    path: long_horizon_2/measuring-tape-middle-trim-2
+    weight: 8
+    excluded_episode_indices: [8, 9]
+    task_text: Tidy up the desk.
+  - name: tape_middle_3
+    path: long_horizon_2/tape-middle-trim
+    weight: 4
+    excluded_episode_indices: [0]
+    task_text: Tidy up the desk.
+  - name: lh3_tape_middle_1
+    path: long_horizon_3/tape-middle-1-trim
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: lh3_tape_middle_2
+    path: long_horizon_3/tape-middle-2-trim-2
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: lh3_tape_middle_3
+    path: long_horizon_3/tape-middle-3-trim
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: lh3_tape_middle_4
+    path: long_horizon_3/tape-middle-4-trim
+    weight: 19
+    task_text: Tidy up the desk.
+  - name: lh3_tape_middle_5
+    path: long_horizon_3/tape-middle-5-trim
+    weight: 6
+    excluded_episode_indices: [3, 4]
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_1
+    path: long_horizon_4/measuring-tape-middle-1-trim
+    weight: 14
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_2
+    path: long_horizon_4/measuring-tape-middle-2-trim
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_3
+    path: long_horizon_4/measuring-tape-middle-3-trim
+    weight: 17
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_4
+    path: long_horizon_4/measuring-tape-middle-4-trim
+    weight: 17
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_5
+    path: long_horizon_4/measuring-tape-middle-5-trim
+    weight: 6
+    task_text: Tidy up the desk.
+  - name: lh4_measuring_tape_middle_legacy_name
+    path: long_horizon_4/measuring-tape-middle-trim
+    weight: 18
+    excluded_episode_indices: [5, 6]
+    task_text: Tidy up the desk.

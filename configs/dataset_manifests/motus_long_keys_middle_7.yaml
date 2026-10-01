@@ -1,0 +1,11 @@
+version: 1
+collection_name: motus_long_keys_middle_7
+root: /root/nas/piper_data/motus_long
+normalization_stats_path: /root/nas/piper_data/motus_long/keys-middle-trim-7/motus_shared/stats.json
+datasets:
+  - name: keys_middle_7
+    path: keys-middle-trim-7
+    weight: 1.0
+    use_for_val: true
+    excluded_episode_indices: [0, 7]
+    task_text: Tidy up the desk.

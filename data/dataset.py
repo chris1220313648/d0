@@ -205,8 +205,10 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
     """
     dataset_type = config.dataset.get('type', 'robotwin')  # Default to robotwin
     
-    if dataset_type == 'robotwin':
+    if dataset_type in ('robotwin', 'robodojo'):
         from .robotwin2.robotwin_agilex_dataset import RobotWinTaskDataset
+        if dataset_type == 'robodojo':
+            from .robotwin2.robodojo_dataset import RoboDojoDataset as RobotWinTaskDataset
         
         # Get all parameters from config
         params = {}
@@ -417,6 +419,21 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
         
         return AlohaAgilex2Dataset(**params)
 
+    elif dataset_type == 'lerobot_sim':
+        from .lerobot.lerobot_sim_dataset import LeRobotSimDataset
+        params = dict(OmegaConf.to_container(config.dataset.get('params', {}), resolve=True))
+        for key in ('dataset_dir', 'task_mode', 'task_name', 'max_episodes', 'max_episodes_per_task',
+                    'normalize_actions', 'use_language_action'):
+            if key in config.dataset:
+                params[key] = config.dataset[key]
+        params.update(global_downsample_rate=config.common.global_downsample_rate,
+                      video_action_freq_ratio=config.common.video_action_freq_ratio,
+                      num_video_frames=config.common.num_video_frames,
+                      video_size=(config.common.video_height, config.common.video_width),
+                      vlm_checkpoint_path=config.model.vlm.checkpoint_path,
+                      image_aug=False)
+        return LeRobotSimDataset(**params)
+
     elif dataset_type == 'lerobot':
         from .lerobot.lerobot_dataset import LeRobotMotusDataset
 
@@ -490,6 +507,12 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['image_aug'] = config.dataset.image_aug and not val
         if hasattr(config.dataset, 'normalize_actions'):
             params['normalize_actions'] = config.dataset.normalize_actions
+        if hasattr(config.dataset, 'normalize_state'):
+            params['normalize_state'] = config.dataset.normalize_state
+        if hasattr(config.dataset, 'normalization_scope'):
+            params['normalization_scope'] = config.dataset.normalization_scope
+        if hasattr(config.dataset, 'normalization_mode'):
+            params['normalization_mode'] = config.dataset.normalization_mode
         if hasattr(config.dataset, 'stats_path'):
             params['stats_path'] = config.dataset.stats_path
         if hasattr(config.dataset, 'stats_key'):
@@ -587,8 +610,20 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['task_name'] = config.dataset.task_name
         if hasattr(config.dataset, 'max_episodes'):
             params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
         if hasattr(config.dataset, 'image_aug'):
             params['image_aug'] = config.dataset.image_aug and not val
+        for name in (
+            'normalize_actions',
+            'normalize_state',
+            'normalization_scope',
+            'normalization_mode',
+            'stats_path',
+            'stats_key',
+        ):
+            if hasattr(config.dataset, name):
+                params[name] = getattr(config.dataset, name)
 
         if hasattr(config.model, 'vlm') and hasattr(config.model.vlm, 'checkpoint_path'):
             params['vlm_checkpoint_path'] = config.model.vlm.checkpoint_path
@@ -665,6 +700,8 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['task_name'] = config.dataset.task_name
         if hasattr(config.dataset, 'max_episodes'):
             params['max_episodes'] = config.dataset.max_episodes
+        if hasattr(config.dataset, 'max_episodes_per_task'):
+            params['max_episodes_per_task'] = config.dataset.max_episodes_per_task
         if hasattr(config.dataset, 'image_aug'):
             params['image_aug'] = config.dataset.image_aug and not val
 
@@ -679,6 +716,15 @@ def _create_single_dataset(config: OmegaConf, val: bool = False):
             params['use_language_action'] = config.dataset.use_language_action
         if hasattr(config.dataset, 'normalize_actions'):
             params['normalize_actions'] = config.dataset.normalize_actions
+        for name in (
+            'normalize_state',
+            'normalization_scope',
+            'normalization_mode',
+            'stats_path',
+            'stats_key',
+        ):
+            if hasattr(config.dataset, name):
+                params[name] = getattr(config.dataset, name)
         if hasattr(config.dataset, 'enable_setup_control_suffix'):
             params['enable_setup_control_suffix'] = config.dataset.enable_setup_control_suffix
         if hasattr(config.dataset, 'setup_text'):

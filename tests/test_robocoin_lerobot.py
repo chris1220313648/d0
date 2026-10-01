@@ -6,6 +6,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -114,6 +115,105 @@ def test_dataset_factory_exposes_lerobot_robocoin_branch():
 
     assert "lerobot_robocoin" in source
     assert "LeRobotRoboCOINDataset" in source
+
+
+def test_robocoin_14a_config_preserves_source_training_and_uses_native_14d():
+    config = yaml.safe_load((REPO_ROOT / "configs" / "robocoin_lap_14a.yaml").read_text(encoding="utf-8"))
+    source = yaml.safe_load(
+        (REPO_ROOT / "configs" / "robocoin_lap_canonical55.yaml").read_text(encoding="utf-8")
+    )
+
+    assert config["common"]["action_dim"] == 14
+    assert config["common"]["state_dim"] == 14
+    assert "canonical_format" not in config["dataset"]
+    assert config["dataset"]["params"]["output_format"] == "dual_eef14_joint14"
+    for section in ("model", "training", "system", "logging", "resume", "finetune"):
+        assert config[section] == source[section]
+
+
+def test_robocoin_dual14_prefers_eef_action_but_uses_seven_joint_state():
+    from data.canonical55 import build_robocoin_dual_eef14_joint14
+
+    names = []
+    values = []
+    for side, offset in (("left", 0.0), ("right", 100.0)):
+        for joint_idx in range(1, 8):
+            names.append(f"{side}_arm_joint_{joint_idx}_rad")
+            values.append(offset + joint_idx)
+        for field_idx, field in enumerate(
+            (
+                "eef_pos_x_m",
+                "eef_pos_y_m",
+                "eef_pos_z_m",
+                "eef_rot_euler_x_rad",
+                "eef_rot_euler_y_rad",
+                "eef_rot_euler_z_rad",
+            )
+        ):
+            names.append(f"{side}_{field}")
+            values.append(offset + 20.0 + field_idx)
+        names.append(f"{side}_gripper_open")
+        values.append(offset + 30.0)
+
+    source = torch.tensor(values, dtype=torch.float32)
+    action, action_mask = build_robocoin_dual_eef14_joint14(source, names, prefix="actions")
+    state, state_mask = build_robocoin_dual_eef14_joint14(source, names, prefix="states")
+
+    torch.testing.assert_close(
+        action,
+        torch.tensor(
+            [20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 30.0, 120.0, 121.0, 122.0, 123.0, 124.0, 125.0, 130.0]
+        ),
+    )
+    torch.testing.assert_close(
+        state,
+        torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0]),
+    )
+    assert action_mask.all()
+    assert state_mask.all()
+
+
+def test_robocoin_dual14_joint_fallback_uses_gripper_and_masks_missing_gripper():
+    from data.canonical55 import build_robocoin_dual_eef14_joint14
+
+    names = [f"left_arm_joint_{idx}_rad" for idx in range(1, 7)]
+    names += ["left_gripper_open"]
+    names += [f"right_arm_joint_{idx}_rad" for idx in range(1, 7)]
+    source = torch.arange(13, dtype=torch.float32)
+
+    action, action_mask = build_robocoin_dual_eef14_joint14(source, names, prefix="actions")
+
+    torch.testing.assert_close(action[:7], source[:7])
+    torch.testing.assert_close(action[7:13], source[7:13])
+    assert bool(action_mask[:13].all())
+    assert action[13].item() == 0.0
+    assert not bool(action_mask[13])
+
+
+def test_robocoin_dual14_maps_end_quaternion_to_eef_action():
+    from data.canonical55 import build_robocoin_dual_eef14_joint14
+
+    names = []
+    values = []
+    for side, offset in (("left", 0.0), ("right", 10.0)):
+        names += [f"{side}_end_pos_{axis}_m" for axis in ("x", "y", "z")]
+        values += [offset + 1.0, offset + 2.0, offset + 3.0]
+        names += [f"{side}_end_quat_{axis}" for axis in ("x", "y", "z", "w")]
+        values += [0.0, 0.0, 0.0, 1.0]
+        names.append(f"{side}_gripper_open")
+        values.append(offset + 4.0)
+
+    action, mask = build_robocoin_dual_eef14_joint14(
+        torch.tensor(values, dtype=torch.float32),
+        names,
+        prefix="actions",
+    )
+
+    torch.testing.assert_close(
+        action,
+        torch.tensor([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 4.0, 11.0, 12.0, 13.0, 0.0, 0.0, 0.0, 14.0]),
+    )
+    assert mask.all()
 
 
 def test_robocoin_validation_targets_cover_selected_episode_ids_in_order():

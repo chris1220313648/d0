@@ -299,7 +299,7 @@ logging:
 
 # Resume training settings
 resume:
-  checkpoint_path: null
+  checkpoint_path: /root/nas/code/d0/checkpoints/multidataset_lap_v4_14a/multidataset_lap_v4_14a_lap_hypertrain/checkpoint_step_80000
   reset_scheduler: false
 
 # Finetune settings

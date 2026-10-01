@@ -12,9 +12,10 @@ Usage:
 Options:
   --checkpoint, -c PATH       Motus DeepSpeed model directory
   --config PATH               Motus config (default: configs/libero_raw_osc_lap_h16.yaml)
+  --benchmark-mode MODE       plus|original (default: plus)
   --task, -t SUITE           libero_spatial|libero_object|libero_goal|libero_10|all
                               (default: libero_goal)
-  --num-trials, -n N         trials per task (default: 1)
+  --num-trials, -n N         trials per task (default: original=20, plus=1)
   --max-tasks N              maximum tasks per suite; -1 means all (default: -1)
   --port, -p PORT            policy server port (default: 9883)
   --host HOST                policy client host (default: 127.0.0.1)
@@ -23,12 +24,12 @@ Options:
   --num-steps-wait N         initial no-op steps (default: 10)
   --num-inference-steps N    diffusion inference steps (default: 10)
   --mujoco-gl BACKEND        egl|osmesa (default: egl)
-  --output-root PATH         output root (default: outputs/libero_plus)
+  --output-root PATH         output root (default: outputs/libero_<mode>)
   --run-name NAME            output subdirectory name (default: checkpoint step name)
   --motus-python PATH        Motus Python executable
   --libero-plus-python PATH  LIBERO-plus Python executable
-  --libero-plus-root PATH    LIBERO-plus repository root
-  --libero-config-path PATH  LIBERO-plus config directory
+  --libero-plus-root PATH    LIBERO repository root (selected automatically by mode)
+  --libero-config-path PATH  LIBERO config directory (selected automatically by mode)
   --server-wait-seconds N    server startup timeout (default: 600)
   --tail-lines N             log lines printed on failure (default: 120)
   --help, -h                 show this help
@@ -37,6 +38,9 @@ Examples:
   # Smoke test: one task, one trial
   scripts/run_libero_plus_eval.sh --task libero_goal --max-tasks 1 --num-trials 1
 
+  # Official original LIBERO smoke test
+  scripts/run_libero_plus_eval.sh --benchmark-mode original --task libero_goal --max-tasks 1 --num-trials 1
+
   # Full four-suite evaluation: 50 trials per task
   scripts/run_libero_plus_eval.sh --task all --num-trials 50
 EOF
@@ -44,8 +48,9 @@ EOF
 
 CHECKPOINT="${CHECKPOINT:-${MOTUS_ROOT}/checkpoints/libero_raw_osc_lap_h16/libero_raw_osc_h16_lap_after_pretrain_gradacc2/checkpoint_step_20000/pytorch_model}"
 CONFIG_PATH="${CONFIG_PATH:-configs/libero_raw_osc_lap_h16.yaml}"
+BENCHMARK_MODE="${BENCHMARK_MODE:-plus}"
 TASK="${TASK:-libero_goal}"
-NUM_TRIALS="${NUM_TRIALS:-1}"
+NUM_TRIALS="${NUM_TRIALS:-}"
 MAX_TASKS="${MAX_TASKS:--1}"
 PORT="${PORT:-9883}"
 CLIENT_HOST="${CLIENT_HOST:-127.0.0.1}"
@@ -54,12 +59,12 @@ SEED="${SEED:-7}"
 NUM_STEPS_WAIT="${NUM_STEPS_WAIT:-10}"
 NUM_INFERENCE_STEPS="${NUM_INFERENCE_STEPS:-10}"
 MUJOCO_GL="${MUJOCO_GL:-egl}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-${MOTUS_ROOT}/outputs/libero_plus}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 RUN_NAME="${RUN_NAME:-}"
 MOTUS_PYTHON="${MOTUS_PYTHON:-/opt/conda/envs/motus/bin/python}"
 LIBERO_PLUS_PYTHON="${LIBERO_PLUS_PYTHON:-/opt/conda/envs/liberoplus/bin/python}"
-LIBERO_PLUS_ROOT="${LIBERO_PLUS_ROOT:-/root/nas/code/LIBERO-plus}"
-LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-/root/.libero_plus}"
+LIBERO_PLUS_ROOT="${LIBERO_PLUS_ROOT:-}"
+LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-}"
 SERVER_WAIT_SECONDS="${SERVER_WAIT_SECONDS:-600}"
 TAIL_LINES="${TAIL_LINES:-120}"
 
@@ -67,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --checkpoint|-c) CHECKPOINT="$2"; shift 2 ;;
         --config) CONFIG_PATH="$2"; shift 2 ;;
+        --benchmark-mode) BENCHMARK_MODE="$2"; shift 2 ;;
         --task|-t) TASK="$2"; shift 2 ;;
         --num-trials|-n) NUM_TRIALS="$2"; shift 2 ;;
         --max-tasks) MAX_TASKS="$2"; shift 2 ;;
@@ -90,6 +96,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+case "${BENCHMARK_MODE}" in
+    plus)
+        LIBERO_PLUS_ROOT="${LIBERO_PLUS_ROOT:-/root/nas/code/LIBERO-plus}"
+        LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-${MOTUS_ROOT}/outputs/.libero_configs/plus}"
+        OUTPUT_ROOT="${OUTPUT_ROOT:-${MOTUS_ROOT}/outputs/libero_plus}"
+        ;;
+    original)
+        LIBERO_PLUS_ROOT="${LIBERO_PLUS_ROOT:-/root/nas/code/LIBERO-original}"
+        LIBERO_CONFIG_PATH="${LIBERO_CONFIG_PATH:-${MOTUS_ROOT}/outputs/.libero_configs/original}"
+        OUTPUT_ROOT="${OUTPUT_ROOT:-${MOTUS_ROOT}/outputs/libero_original}"
+        ;;
+    *) echo "Unsupported benchmark mode: ${BENCHMARK_MODE}" >&2; exit 2 ;;
+esac
+
+if [[ -z "${NUM_TRIALS}" ]]; then
+    if [[ "${BENCHMARK_MODE}" == "original" ]]; then
+        NUM_TRIALS=20
+    else
+        NUM_TRIALS=1
+    fi
+fi
+
 case "${TASK}" in
     libero_spatial|libero_object|libero_goal|libero_10|all) ;;
     *) echo "Unsupported task suite: ${TASK}" >&2; exit 2 ;;
@@ -104,6 +132,24 @@ esac
 [[ -x "${MOTUS_PYTHON}" ]] || { echo "Motus Python not executable: ${MOTUS_PYTHON}" >&2; exit 1; }
 [[ -x "${LIBERO_PLUS_PYTHON}" ]] || { echo "LIBERO-plus Python not executable: ${LIBERO_PLUS_PYTHON}" >&2; exit 1; }
 [[ -d "${LIBERO_PLUS_ROOT}" ]] || { echo "LIBERO-plus root not found: ${LIBERO_PLUS_ROOT}" >&2; exit 1; }
+if [[ ! -f "${LIBERO_CONFIG_PATH}/config.yaml" ]]; then
+    mkdir -p "${LIBERO_CONFIG_PATH}"
+    printf '%s\n' \
+        "assets: ${LIBERO_PLUS_ROOT}/libero/libero/assets" \
+        "bddl_files: ${LIBERO_PLUS_ROOT}/libero/libero/bddl_files" \
+        "benchmark_root: ${LIBERO_PLUS_ROOT}/libero/libero" \
+        "datasets: ${LIBERO_PLUS_ROOT}/libero/datasets" \
+        "init_states: ${LIBERO_PLUS_ROOT}/libero/libero/init_files" \
+        >"${LIBERO_CONFIG_PATH}/config.yaml"
+    echo "Generated LIBERO config: ${LIBERO_CONFIG_PATH}/config.yaml"
+fi
+if [[ "${BENCHMARK_MODE}" == "original" ]]; then
+    official_remote="$(git -C "${LIBERO_PLUS_ROOT}" remote get-url origin 2>/dev/null || true)"
+    [[ "${official_remote}" == *"Lifelong-Robot-Learning/LIBERO"* ]] || {
+        echo "Original mode requires the official Lifelong-Robot-Learning/LIBERO repository; got: ${official_remote}" >&2
+        exit 1
+    }
+fi
 
 CHECKPOINT="$(readlink -f "${CHECKPOINT}")"
 if [[ -z "${RUN_NAME}" ]]; then
@@ -150,7 +196,9 @@ wait_for_server() {
     return 1
 }
 
-echo "Starting Motus LIBERO-plus evaluation:"
+echo "Starting Motus LIBERO evaluation:"
+echo "  BENCHMARK_MODE=${BENCHMARK_MODE}"
+echo "  LIBERO_ROOT=${LIBERO_PLUS_ROOT}"
 echo "  CHECKPOINT=${CHECKPOINT}"
 echo "  CONFIG_PATH=${CONFIG_PATH}"
 echo "  TASK=${TASK}"
@@ -200,6 +248,7 @@ run_suite() {
         exec "${LIBERO_PLUS_PYTHON}" examples/libero_plus/eval_libero.py \
             --host "${CLIENT_HOST}" \
             --port "${PORT}" \
+            --benchmark-mode "${BENCHMARK_MODE}" \
             --task-suite-name "${suite}" \
             --num-trials-per-task "${NUM_TRIALS}" \
             --max-tasks "${MAX_TASKS}" \
@@ -225,4 +274,4 @@ else
     run_suite "${TASK}"
 fi
 
-echo "LIBERO-plus evaluation complete. Outputs: ${RUN_DIR}"
+echo "LIBERO evaluation complete. Outputs: ${RUN_DIR}"

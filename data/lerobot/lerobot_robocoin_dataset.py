@@ -57,6 +57,8 @@ import torch
 
 from lerobot.datasets.video_utils import decode_video_frames
 
+from data.canonical55 import build_robocoin_dual_eef14_joint14
+from data.utils.per_task_norm import PerTaskNormalizer
 from .lerobot_dataset import LeRobotMotusDataset, preprocess_vlm_messages, tensor_to_pil
 from utils.vlm_utils import preprocess_vlm_messages_lap
 
@@ -120,7 +122,13 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
         visual_keys: Optional[Sequence[str]] = None,
         language_action_dir_name: str = "language_action",
         normalize_actions: bool = False,
+        normalize_state: bool = False,
+        normalization_scope: str = "dataset",
+        normalization_mode: str = "q01_q99",
+        stats_path: Optional[str] = None,
+        stats_key: str = "robocoin",
         use_language_action: bool = False,
+        output_format: str = "raw",
         bad_episodes_path: Optional[str | Sequence[str]] = None,
         skip_bad_episodes: bool = True,
         sample_retry_attempts: int = 16,
@@ -132,21 +140,35 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
         # ignored now because canonical55 mapping happens before collation.
         kwargs.pop("target_action_dim", None)
         kwargs.pop("target_state_dim", None)
-        if normalize_actions:
+        if (normalize_actions or normalize_state) and (
+            output_format != "dual_eef14_joint14" or normalization_scope != "per_task"
+        ):
             raise ValueError(
-                "LeRobotRoboCOINDataset emits heterogeneous raw RoboCOIN actions; "
-                "normalization requires per-robot canonical stats and is intentionally disabled."
+                "RoboCOIN normalization requires output_format='dual_eef14_joint14' "
+                "and normalization_scope='per_task'."
             )
+        self.output_format = str(output_format)
+        if self.output_format not in {"raw", "dual_eef14_joint14"}:
+            raise ValueError(f"Unsupported RoboCOIN output_format: {self.output_format}")
+        self.skip_bad_episodes = bool(skip_bad_episodes)
+        self.bad_episode_keys = self._load_bad_episode_keys(bad_episodes_path)
+        if kwargs.get("max_episodes_per_task") is not None:
+            kwargs["excluded_episode_keys"] = self.bad_episode_keys
         super().__init__(*args, **kwargs)
+        self.normalize_actions = bool(normalize_actions)
+        self.normalize_state = bool(normalize_state)
+        self.per_task_normalizer = None
+        if self.normalize_actions or self.normalize_state:
+            if stats_path is None:
+                raise ValueError("RoboCOIN per-task normalization requires stats_path")
+            self.per_task_normalizer = PerTaskNormalizer(stats_path, str(stats_key), normalization_mode)
         self.use_language_action = bool(use_language_action)
         self.language_action_dir_name = str(language_action_dir_name).strip() or "language_action"
         self.visual_keys_override = tuple(visual_keys) if visual_keys is not None else None
         self._language_action_cache: Dict[Tuple[int, int], List[str]] = {}
         self._visual_keys_cache: Dict[str, Tuple[str, ...]] = {}
-        self.skip_bad_episodes = bool(skip_bad_episodes)
         self.sample_retry_attempts = max(1, int(sample_retry_attempts))
         self.sample_fallback_attempts = max(0, int(sample_fallback_attempts))
-        self.bad_episode_keys = self._load_bad_episode_keys(bad_episodes_path)
         self._sample_episode_targets = self._filtered_episode_targets()
         if not self._sample_episode_targets:
             raise ValueError("RoboCOIN dataset has no eligible episodes after blacklist filtering")
@@ -331,6 +353,7 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
         else:
             raise KeyError("No state found in item (expected observation.state/actions/action)")
         initial_state = initial_state_raw.float()
+        state_mask = None
 
         action_key = "action" if "action" in hf_dataset.column_names else None
         if action_key is None and "actions" in hf_dataset.column_names:
@@ -343,6 +366,28 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
         if raw_action_sequence.ndim == 1:
             raw_action_sequence = raw_action_sequence.unsqueeze(0)
         action_sequence = raw_action_sequence.float()
+        action_mask = None
+
+        if self.output_format == "dual_eef14_joint14":
+            initial_state, state_mask = build_robocoin_dual_eef14_joint14(
+                initial_state,
+                state_names,
+                prefix="states",
+            )
+            action_sequence, action_mask = build_robocoin_dual_eef14_joint14(
+                action_sequence,
+                action_names,
+                prefix="actions",
+            )
+            task_key = self.repo_ids[int(task_idx)] if self.task_mode == "multi" else self.repo_id
+            if self.normalize_state:
+                initial_state = self.per_task_normalizer.normalize(
+                    task_key, "state", initial_state, state_mask
+                )
+            if self.normalize_actions:
+                action_sequence = self.per_task_normalizer.normalize(
+                    task_key, "action", action_sequence, action_mask
+                )
 
         language_embedding = self._load_language_embedding(item_cond, task_idx)
         language_action = None
@@ -366,7 +411,7 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
                 language_action,
             )
 
-        return {
+        sample = {
             "first_frame": first_frame,
             "video_frames": video_frames_sampled,
             "initial_state": initial_state,
@@ -376,6 +421,11 @@ class LeRobotRoboCOINDataset(LeRobotMotusDataset):
             "language_embedding": language_embedding,
             "vlm_inputs": vlm_tokens,
         }
+        if state_mask is not None:
+            sample["state_mask"] = state_mask
+        if action_mask is not None:
+            sample["action_mask"] = action_mask
+        return sample
 
     def _read_timestamps(self, hf_dataset, indices: List[int]) -> List[float]:
         ts_vals = hf_dataset[indices]["timestamp"]

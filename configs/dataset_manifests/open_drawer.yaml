@@ -5,12 +5,29 @@ normalization_stats_path: /root/nas/piper_data/open_drawer/motus_shared/stats.js
 datasets:
   - name: open_bottom_drawer
     path: open-bottom-drawer-trim
-    weight: 1.0
+    weight: 49
     use_for_val: true
     excluded_episode_indices: [15]
     task_text: open the bottom drawer and put the stuff in the bottom drawer
   - name: open_top_drawer
     path: open-top-drawer-trim
-    weight: 1.0
+    weight: 49
     excluded_episode_indices: [41]
+    task_text: open the top drawer and put the stuff in the top drawer
+  - name: sort_stuff_bottom
+    path: sort_stuff_bottom-trim
+    weight: 15
+    excluded_episode_indices: [4, 9]
+    task_text: open the bottom drawer and put the stuff in the bottom drawer
+  - name: sort_stuff_top
+    path: sort_stuff_top-trim
+    weight: 19
+    task_text: open the top drawer and put the stuff in the top drawer
+  - name: sort_stuff_bottom_1
+    path: sort_stuff_bottom-trim-1
+    weight: 21
+    task_text: open the bottom drawer and put the stuff in the bottom drawer
+  - name: sort_stuff_top_1
+    path: sort_stuff_top-trim-1
+    weight: 20
     task_text: open the top drawer and put the stuff in the top drawer

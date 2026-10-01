@@ -87,6 +87,7 @@ def build_config(
         raise ValueError(f"Template must contain a YAML mapping: {template_path}")
     dataset_config = config["dataset"]
     base_params = copy.deepcopy(dataset_config.pop("ola_params"))
+    use_language_action = bool(dataset_config.pop("use_language_action", True))
     is_mixture = len({item.collection for item in resolved.datasets}) > 1
     children = []
     subset_children = []
@@ -122,12 +123,12 @@ def build_config(
                 "dataset_dir": str(item.path),
                 "max_episodes": None,
                 "image_aug": False,
-                "use_language_action": True,
+                "use_language_action": use_language_action,
                 "params": params,
             }
         )
     dataset_config["datasets"] = children
-    name = resolved.name
+    name = f"{resolved.name}_joint" if base_params.get("action_representation") == "absolute_joint" else resolved.name
     if episode_fraction is not None:
         name = f"{name}_{_fraction_tag(episode_fraction)}"
         dataset_config["episode_subset"] = {
@@ -142,13 +143,21 @@ def build_config(
     return config, resolved.source_path, name
 
 
-def check_artifacts(manifest_path: str | Path) -> None:
+def check_artifacts(manifest_path: str | Path, template_path: str | Path) -> None:
     resolved = load_manifest(manifest_path)
+    template = OmegaConf.load(template_path)
+    params = template.dataset.ola_params
+    motus_dir_name = str(params.get("motus_dir_name", "motus"))
+    action_representation = str(params.get("action_representation", "delta_eef"))
     missing: list[str] = []
     if not resolved.stats_path.is_file():
         missing.append(str(resolved.stats_path))
+    elif action_representation == "absolute_joint":
+        stats = json.loads(resolved.stats_path.read_text(encoding="utf-8"))
+        if stats.get("action_representation") != "absolute_joint":
+            raise ValueError(f"Joint template requires absolute_joint stats: {resolved.stats_path}")
     for item in resolved.datasets:
-        motus = item.path / "motus"
+        motus = item.path / motus_dir_name
         for path in (motus / "schema.json", motus / "language_action", motus / "t5_embeddings"):
             if not path.exists():
                 missing.append(str(path))
@@ -168,7 +177,7 @@ def main() -> None:
     parser.add_argument("--episode-fraction", type=float, default=None)
     args = parser.parse_args()
     if args.check_artifacts:
-        check_artifacts(args.manifest)
+        check_artifacts(args.manifest, args.template)
     config, source_path, name = build_config(
         args.manifest,
         args.template,

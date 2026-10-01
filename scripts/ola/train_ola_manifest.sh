@@ -36,6 +36,9 @@ fi
 conda activate motus
 
 GENERATOR_ARGS=(--manifest "$MANIFEST" --check-artifacts)
+if [ -n "${OLA_TEMPLATE:-}" ]; then
+    GENERATOR_ARGS+=(--template "$OLA_TEMPLATE")
+fi
 if [ -n "$EPISODE_FRACTION" ]; then
     GENERATOR_ARGS+=(--episode-fraction "$EPISODE_FRACTION")
 fi

@@ -1,0 +1,9 @@
+# Install with --no-deps --target $ROBOT6_DEPS alongside the existing Motus environment.
+lerobot==0.3.2
+peft==0.17.1
+jsonlines==4.0.0
+draccus==0.10.0
+gymnasium==0.29.1
+deepdiff==8.6.1
+orderly-set==5.5.0
+# Local ABI-matched wheel: /root/nas/.cache/starvla-u0/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl

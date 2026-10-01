@@ -369,6 +369,7 @@ def _summarize_window(
     input_mode: str,
     input_dir_name: str,
     quat_order: str,
+    sum_decimal: str = "1f",
 ) -> str:
     delta_window, include_gripper_action = _to_delta_window(
         window_actions=window_actions,
@@ -380,28 +381,28 @@ def _summarize_window(
     if dim == 14:
         text = summarize_bimanual_numeric_actions(
             delta_window,
-            sum_decimal="1f",
+            sum_decimal=sum_decimal,
             include_rotation=True,
             include_gripper_action=include_gripper_action,
         )
     elif dim == 12:
         text = summarize_bimanual_numeric_actions(
             delta_window,
-            sum_decimal="1f",
+            sum_decimal=sum_decimal,
             include_rotation=True,
             include_gripper_action=False,
         )
     elif dim == 7:
         text = summarize_numeric_actions(
             delta_window,
-            sum_decimal="1f",
+            sum_decimal=sum_decimal,
             include_rotation=True,
             include_gripper_action=include_gripper_action,
         )
     elif dim == 6:
         text = summarize_numeric_actions(
             delta_window,
-            sum_decimal="1f",
+            sum_decimal=sum_decimal,
             include_rotation=True,
             include_gripper_action=False,
         )
@@ -436,6 +437,7 @@ class RobotWinLanguageActionBackfill:
         quat_order: str = "wxyz",
         output_dir_name: str = "language_action",
         overwrite: bool = False,
+        sum_decimal: str = "1f",
     ) -> None:
         self.target_root = target_root
         self.subsets = subsets
@@ -445,6 +447,7 @@ class RobotWinLanguageActionBackfill:
         self.quat_order = quat_order
         self.output_dir_name = output_dir_name
         self.overwrite = overwrite
+        self.sum_decimal = sum_decimal
 
         self._validate()
 
@@ -453,6 +456,8 @@ class RobotWinLanguageActionBackfill:
             raise FileNotFoundError(f"target_root not found: {self.target_root}")
         if self.window_size <= 0:
             raise ValueError(f"window_size must be > 0, got {self.window_size}")
+        if self.sum_decimal not in {"0f", "1f"}:
+            raise ValueError(f"Unsupported sum_decimal={self.sum_decimal}")
         if not self.subsets:
             raise ValueError("subsets is empty")
         if not self.input_dir_name.strip():
@@ -477,6 +482,7 @@ class RobotWinLanguageActionBackfill:
                     input_mode=self.input_mode,
                     input_dir_name=self.input_dir_name,
                     quat_order=self.quat_order,
+                    sum_decimal=self.sum_decimal,
                 )
             )
 
@@ -488,7 +494,7 @@ class RobotWinLanguageActionBackfill:
         stats = BackfillStats()
 
         logger.info(
-            "Language action backfill started: target_root=%s subsets=%s window_size=%d input_dir=%s input_mode=%s quat_order=%s output_dir=%s overwrite=%s",
+            "Language action backfill started: target_root=%s subsets=%s window_size=%d input_dir=%s input_mode=%s quat_order=%s output_dir=%s overwrite=%s sum_decimal=%s",
             self.target_root,
             ",".join(self.subsets),
             self.window_size,
@@ -497,6 +503,7 @@ class RobotWinLanguageActionBackfill:
             self.quat_order,
             self.output_dir_name,
             self.overwrite,
+            self.sum_decimal,
         )
 
         for subset in self.subsets:
@@ -532,6 +539,8 @@ class RobotWinLanguageActionBackfill:
                         if ok:
                             stats.episodes_generated += 1
                             stats.generated_lines += num_lines
+                            if stats.episodes_generated % 1000 == 0:
+                                logger.info("Progress: episodes_generated=%d generated_lines=%d", stats.episodes_generated, stats.generated_lines)
                     except Exception as err:  # noqa: BLE001
                         stats.episodes_failed += 1
                         logger.error("Failed episode: %s error=%s", input_path, err)
@@ -601,6 +610,12 @@ def parse_args() -> argparse.Namespace:
         help="Output directory name under each task.",
     )
     parser.add_argument(
+        "--sum-decimal",
+        choices=["0f", "1f"],
+        default="1f",
+        help="Translation precision in centimeters: 0f for integers, 1f for one decimal.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Overwrite existing language_action/*.txt files.",
@@ -630,6 +645,7 @@ def main() -> None:
             quat_order=args.quat_order,
             output_dir_name=args.output_dir_name,
             overwrite=args.overwrite,
+            sum_decimal=args.sum_decimal,
         )
         code = runner.run()
         sys.exit(code)

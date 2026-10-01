@@ -68,6 +68,7 @@ from data.canonical55 import (
 )
 from data.utils.image_utils import resize_with_padding
 from data.utils.norm import load_normalization_stats, normalize_actions
+from data.utils.per_task_norm import PerTaskNormalizer
 from utils.vlm_utils import append_setup_control_suffix, preprocess_vlm_messages_lap
 
 
@@ -87,6 +88,9 @@ class LeRobotAgiBotDataset(LeRobotMotusDataset):
         visual_keys: Optional[Sequence[str]] = None,
         language_action_dir_name: str = "language_action",
         normalize_actions: bool = False,
+        normalize_state: bool = False,
+        normalization_scope: str = "dataset",
+        normalization_mode: str = "q01_q99",
         stats_path: Optional[str] = None,
         stats_key: str = "agibot",
         use_language_action: bool = False,
@@ -101,16 +105,25 @@ class LeRobotAgiBotDataset(LeRobotMotusDataset):
         self.output_format = str(output_format)
         if self.output_format not in {"canonical55", "dual_eef14_joint14"}:
             raise ValueError(f"Unsupported AgiBot output_format: {self.output_format}")
-        if self.output_format == "dual_eef14_joint14" and normalize_actions:
-            raise ValueError("AgiBot dual_eef14_joint14 output does not support 55D normalization")
+        if self.output_format == "dual_eef14_joint14" and (normalize_actions or normalize_state):
+            if normalization_scope != "per_task":
+                raise ValueError("AgiBot dual_eef14_joint14 normalization requires per-task stats")
         super().__init__(*args, **kwargs)
         self.normalize_actions = bool(normalize_actions)
+        self.normalize_state = bool(normalize_state)
         self.stats_key = str(stats_key)
+        self.per_task_normalizer = None
         self.agibot_state_min = None
         self.agibot_state_max = None
         self.agibot_action_min = None
         self.agibot_action_max = None
-        if getattr(self, "normalize_actions", False):
+        if self.output_format == "dual_eef14_joint14" and (
+            self.normalize_actions or self.normalize_state
+        ):
+            if stats_path is None:
+                raise ValueError("AgiBot per-task normalization requires stats_path")
+            self.per_task_normalizer = PerTaskNormalizer(stats_path, self.stats_key, normalization_mode)
+        elif getattr(self, "normalize_actions", False):
             if stats_path is None:
                 stats_path = str((Path(__file__).resolve().parent.parent / "utils" / "stat.json"))
             self.agibot_state_min, self.agibot_state_max = load_normalization_stats(
@@ -231,6 +244,15 @@ class LeRobotAgiBotDataset(LeRobotMotusDataset):
                 item_cond[action_key],
                 ds_media,
             )
+            task_key = self.repo_ids[int(task_idx)] if self.task_mode == "multi" else self.repo_id
+            if self.normalize_state:
+                initial_state = self.per_task_normalizer.normalize(
+                    task_key, "state", initial_state, state_mask
+                )
+            if self.normalize_actions:
+                action_sequence = self.per_task_normalizer.normalize(
+                    task_key, "action", action_sequence, action_mask
+                )
         else:
             initial_state, state_mask = self._select_state(raw_state, ds_media)
             action_sequence, action_mask = self._select_action_sequence(

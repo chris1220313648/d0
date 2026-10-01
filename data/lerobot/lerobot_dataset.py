@@ -223,6 +223,8 @@ class LeRobotMotusDataset(data.Dataset):
         
         # Episode limits
         max_episodes: int = 10000,
+        max_episodes_per_task: Optional[int] = None,
+        excluded_episode_keys: Optional[set[Tuple[str, int]]] = None,
         
         # Data augmentation
         image_aug: bool = False,
@@ -279,6 +281,7 @@ class LeRobotMotusDataset(data.Dataset):
         self.action_chunk_size = self.num_video_frames * self.video_action_freq_ratio
 
         self.max_episodes = max_episodes
+        self.max_episodes_per_task = max_episodes_per_task
         self.image_aug = image_aug # No extra augmentation on LeRobot side for now
         self.task_mode = task_mode
         if isinstance(task_name, str) and task_name.strip().lower() in {"", "none", "null"}:
@@ -343,6 +346,12 @@ class LeRobotMotusDataset(data.Dataset):
                 task_name: list(range(int(meta.total_episodes)))
                 for task_name, meta in zip(self.repo_ids, metas)
             }
+            if self.max_episodes_per_task is not None:
+                self.episode_ids = self._limit_multi_episode_ids_per_task(
+                    self.episode_ids,
+                    int(self.max_episodes_per_task),
+                    excluded_episode_keys,
+                )
             if self.max_episodes is not None and self.max_episodes > 0:
                 self.episode_ids = self._limit_multi_episode_ids(self.episode_ids, int(self.max_episodes))
                 self.repo_ids = [task_name for task_name in self.repo_ids if self.episode_ids.get(task_name)]
@@ -536,6 +545,28 @@ class LeRobotMotusDataset(data.Dataset):
             limited.setdefault(task_name, []).append(episode_id)
         for ids in limited.values():
             ids.sort()
+        return limited
+
+    @staticmethod
+    def _limit_multi_episode_ids_per_task(
+        episode_ids: Dict[str, List[int]],
+        max_episodes_per_task: int,
+        excluded_episode_keys: Optional[set[Tuple[str, int]]] = None,
+    ) -> Dict[str, List[int]]:
+        if max_episodes_per_task <= 0:
+            raise ValueError("max_episodes_per_task must be positive")
+        excluded = excluded_episode_keys or set()
+        limited = {
+            task_name: [
+                episode_id
+                for episode_id in ids
+                if (task_name, episode_id) not in excluded
+            ][:max_episodes_per_task]
+            for task_name, ids in episode_ids.items()
+        }
+        empty_tasks = [task_name for task_name, ids in limited.items() if not ids]
+        if empty_tasks:
+            raise ValueError(f"Tasks have no eligible episodes after filtering: {empty_tasks[:10]}")
         return limited
 
     def _episodes_jsonl_path(self) -> Path:

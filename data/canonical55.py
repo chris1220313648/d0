@@ -264,6 +264,58 @@ def map_robocoin_named_vector(source: torch.Tensor, names: Sequence[str]) -> Tup
     return value, mask
 
 
+def build_robocoin_dual_eef14_joint14(
+    source: torch.Tensor,
+    names: Sequence[str],
+    prefix: str,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Build compact dual-arm 14D action/state tensors from named RoboCOIN vectors.
+
+    Each arm owns seven slots. EEF actions use xyz+rpy+gripper when a complete
+    EEF pose exists. Joint states and joint-action fallbacks use all seven arm
+    joints when joint 7 exists; otherwise they use six joints plus gripper.
+    Missing fields remain zero and masked out.
+    """
+    if prefix not in {"actions", "states"}:
+        raise ValueError(f"Unsupported RoboCOIN 14D prefix: {prefix}")
+
+    source = torch.as_tensor(source).float()
+    canonical, canonical_mask = map_robocoin_named_vector(source, names)
+    value = source.new_zeros((*source.shape[:-1], 14))
+    mask = torch.zeros(value.shape, dtype=torch.bool, device=source.device)
+
+    for dst_start, joint_slice, eef_slice, gripper_idx in (
+        (0, LEFT_ARM_JOINT, LEFT_EEF, 26),
+        (7, RIGHT_ARM_JOINT, RIGHT_EEF, 27),
+    ):
+        joint_values = canonical[..., joint_slice]
+        joint_mask = canonical_mask[..., joint_slice]
+        eef_values = canonical[..., eef_slice]
+        eef_mask = canonical_mask[..., eef_slice]
+
+        use_eef = prefix == "actions" and bool(eef_mask.all().item())
+        if use_eef:
+            value[..., dst_start : dst_start + 6] = eef_values
+            mask[..., dst_start : dst_start + 6] = eef_mask
+            value[..., dst_start + 6] = canonical[..., gripper_idx]
+            mask[..., dst_start + 6] = canonical_mask[..., gripper_idx]
+            continue
+
+        has_joint_7 = bool(joint_mask[..., 6].all().item())
+        if has_joint_7:
+            value[..., dst_start : dst_start + 7] = joint_values
+            mask[..., dst_start : dst_start + 7] = joint_mask
+        else:
+            value[..., dst_start : dst_start + 6] = joint_values[..., :6]
+            mask[..., dst_start : dst_start + 6] = joint_mask[..., :6]
+            value[..., dst_start + 6] = canonical[..., gripper_idx]
+            mask[..., dst_start + 6] = canonical_mask[..., gripper_idx]
+
+    if not bool(mask.any().item()):
+        raise KeyError(f"No usable RoboCOIN {prefix} fields found for 14D mapping")
+    return value, mask
+
+
 def _canonicalize_state(
     source: torch.Tensor,
     dataset_type: str,

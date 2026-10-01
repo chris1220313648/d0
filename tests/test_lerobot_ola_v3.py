@@ -146,6 +146,23 @@ def test_lap_supports_48_action_chunk_for_eight_video_frames():
     assert "move forward 4.8 cm" in first["text"]
 
 
+def test_lap_can_prepend_subtask_aligned_to_first_future_action():
+    relative = np.zeros((6, 14), dtype=np.float32)
+    subtasks = np.array([20, 20, 23, 23, 23, 23])
+    rows = _language_action_rows(
+        relative,
+        np.arange(6),
+        window_size=4,
+        subtask_indices=subtasks,
+        subtask_text={20: "First task", 23: "Second\ntask"},
+    )
+    assert rows[0]["subtask_index"] == 20
+    assert rows[0]["text"].startswith("Subtask: First task\n")
+    assert rows[1]["subtask_index"] == 23
+    assert rows[1]["subtask"] == "Second task"
+    assert rows[1]["text"].startswith("Subtask: Second task\n")
+
+
 def test_multi_root_stats_requires_explicit_shared_path_before_io():
     args = SimpleNamespace(
         roots=["dataset_a", "dataset_b"],

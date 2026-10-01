@@ -1,0 +1,4 @@
+# Install into a private --target directory; reuse the existing torch/transformers environment.
+scikit-learn==1.7.2
+joblib==1.5.2
+threadpoolctl==3.6.0

@@ -1,0 +1,70 @@
+version: 1
+collection_name: long_horizon
+root: /root/nas/piper_data
+normalization_stats_path: /root/nas/piper_data/long_horizon/motus_shared/stats.json
+datasets:
+  - name: charging_cable_middle_1
+    path: long_horizon/charging-cable-middle-1-trim-3
+    weight: 5
+    use_for_val: true
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_2
+    path: long_horizon/charging-cable-middle-2-trim
+    weight: 15
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_3
+    path: long_horizon/charging-cable-middle-trim-3
+    weight: 18
+    task_text: Tidy up the desk.
+  - name: keys_middle
+    path: long_horizon/keys-middle-trim
+    weight: 20
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_2a
+    path: long_horizon/measuring-tape-middle-trim-2
+    weight: 18
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_4
+    path: "long_horizon_1/charging-cable‑middle-2-trim-2"
+    weight: 10
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_3
+    path: "long_horizon_1/measuring‑tape‑middle-trim-3"
+    weight: 30
+    task_text: Tidy up the desk.
+  - name: tape_middle_1
+    path: "long_horizon_1/tape‑middle-1-trim-2"
+    weight: 30
+    task_text: Tidy up the desk.
+  - name: tape_middle_2
+    path: "long_horizon_1/tape‑middle-trim-2"
+    weight: 7
+    task_text: Tidy up the desk.
+  - name: charging_cable_middle_5
+    path: long_horizon_2/charging-cable-middle-trim
+    weight: 5
+    task_text: Tidy up the desk.
+  - name: key_middle_2
+    path: long_horizon_2/key-middle-trim-2
+    weight: 6
+    task_text: Tidy up the desk.
+  - name: keys_middle_7
+    path: long_horizon_2/keys-middle-trim-7
+    weight: 21
+    excluded_episode_indices: [0, 7]
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_space
+    path: "long_horizon_2/measuring tape -middle-trim"
+    weight: 4
+    excluded_episode_indices: [1]
+    task_text: Tidy up the desk.
+  - name: measuring_tape_middle_2b
+    path: long_horizon_2/measuring-tape-middle-trim-2
+    weight: 8
+    excluded_episode_indices: [8, 9]
+    task_text: Tidy up the desk.
+  - name: tape_middle_3
+    path: long_horizon_2/tape-middle-trim
+    weight: 4
+    excluded_episode_indices: [0]
+    task_text: Tidy up the desk.

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "output_format": "dual_eef14_joint14",
+  "normalization_mode": "q01_q99",
+  "config": "/root/nas/code/d0/configs/multidataset_lap_v5_vqa.yaml",
+  "datasets": {
+    "interndata": {
+      "task_count": 1474,
+      "file": "interndata.json"
+    },
+    "robocoin": {
+      "task_count": 308,
+      "file": "robocoin.json"
+    },
+    "agibot": {
+      "task_count": 127,
+      "file": "agibot.json"
+    }
+  }
+}

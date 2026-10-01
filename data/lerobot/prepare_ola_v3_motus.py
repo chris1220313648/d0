@@ -2,10 +2,10 @@
 """Prepare an aggregated LeRobot v3 OLA dataset for Motus LAP training.
 
 The script never rewrites source parquet/video files. It validates the v3
-schema and writes versioned Motus sidecars under ``<dataset>/motus``:
+schema and writes versioned Motus sidecars under ``<dataset>/<motus-dir-name>``:
 
 * ``schema.json``: exact state/action/camera contract
-* ``stats.json``: state and relative-action normalization statistics (single root)
+* ``stats.json``: state and selected-action normalization statistics (single root)
 * ``language_action/episode_XXXXXX.jsonl``: one LAP answer per source frame
 * ``t5_embeddings/task_XXXXXX.pt``: optional offline WAN UMT5 cache
 * ``preparation_report.json``: counts and validation summary
@@ -117,8 +117,13 @@ def _language_action_rows(
     relative_actions: np.ndarray,
     frame_indices: np.ndarray,
     window_size: int,
+    subtask_indices: np.ndarray | None = None,
+    subtask_text: Mapping[int, str] | None = None,
 ) -> list[Dict[str, Any]]:
-    """Describe exactly the same future delta-EEF chunk used by action loss.
+    """Describe EEF motion over the future timesteps used by action loss.
+
+    In absolute-joint mode LAP retains its EEF description while action loss
+    uses joint targets for the same timesteps.
 
     Annotation row ``t`` summarizes model actions ``t+1 .. t+window_size``.
     Tail rows are retained for completeness, although the loader never samples
@@ -138,20 +143,42 @@ def _language_action_rows(
             input_dir_name="action",
             quat_order="xyzw",
         )
-        rows.append(
-            {
-                "frame_index": int(frame_indices[local_index]),
-                "start_frame_index": int(frame_indices[start]),
-                "end_frame_index": int(frame_indices[min(stop - 1, total - 1)]),
-                "text": text,
-            }
-        )
+        row = {
+            "frame_index": int(frame_indices[local_index]),
+            "start_frame_index": int(frame_indices[start]),
+            "end_frame_index": int(frame_indices[min(stop - 1, total - 1)]),
+            "text": text,
+        }
+        if subtask_indices is not None:
+            subtask_index = int(subtask_indices[start])
+            if subtask_text is None or subtask_index not in subtask_text:
+                raise KeyError(f"Missing text for subtask_index={subtask_index}")
+            subtask = str(subtask_text[subtask_index]).replace("\n", " ").strip()
+            row.update(
+                subtask_index=subtask_index,
+                subtask=subtask,
+                text=f"Subtask: {subtask}\n{text}",
+            )
+        rows.append(row)
     return rows
 
 
-def _schema(args: argparse.Namespace, info: Mapping[str, Any]) -> Dict[str, Any]:
+def _load_subtask_text(root: Path) -> Dict[int, str]:
+    import pyarrow.parquet as pq
+
+    path = root / "meta" / "subtasks.parquet"
+    if not path.is_file():
+        raise FileNotFoundError(f"Subtask metadata not found: {path}")
     return {
+        int(row["subtask_index"]): str(row["subtask"])
+        for row in pq.read_table(path, columns=["subtask_index", "subtask"]).to_pylist()
+    }
+
+
+def _schema(args: argparse.Namespace, info: Mapping[str, Any]) -> Dict[str, Any]:
+    schema = {
         "version": "ola_motus_v2",
+        "action_representation": args.action_representation,
         "source_format": "lerobot_v3",
         "fps": int(info.get("fps", 30)),
         "state": {
@@ -212,11 +239,26 @@ def _schema(args: argparse.Namespace, info: Mapping[str, Any]) -> Dict[str, Any]
             "layout_ratio": "front_2_over_3__wrists_1_over_3",
         },
         "language_action": {
-            "source": "model_delta_action",
+            "source": "model_delta_action" if args.action_representation == "delta_eef" else "delta_eef_action",
             "condition_offset": 1,
             "window_size": int(args.window_size),
+            "prepend_subtask": bool(args.prepend_subtask_to_lap),
+            "subtask_alignment": "first_future_action" if args.prepend_subtask_to_lap else None,
         },
     }
+    if args.action_representation == "absolute_joint":
+        schema["joint_action"] = {
+            "key": args.joint_action_key,
+            "dim": 14,
+            "joint_unit": "dataset_native",
+        }
+        schema["model_action"] = {
+            "dim": 14,
+            "layout": "left_joint_1..6_gripper__right_joint_1..6_gripper",
+            "joint_unit": "dataset_native",
+            "gripper_range": [0.0, 1.0],
+        }
+    return schema
 
 
 def _prepare_root(
@@ -232,11 +274,14 @@ def _prepare_root(
     if str(info.get("codebase_version")) != "v3.0":
         raise ValueError(f"Expected LeRobot v3.0, got {info.get('codebase_version')}")
     features = info.get("features", {})
-    for key, expected_dim in (
+    required_features = [
         (args.state_key, 14),
         (args.eef_state_key, 16),
         (args.absolute_action_key, 16),
-    ):
+    ]
+    if args.action_representation == "absolute_joint":
+        required_features.append((args.joint_action_key, 14))
+    for key, expected_dim in required_features:
         if key not in features:
             if key == args.state_key and args.allow_missing_joint:
                 logger.warning("Joint state column %s is missing; stats will not be written", key)
@@ -268,6 +313,7 @@ def _prepare_root(
     state_values: list[np.ndarray] = []
     action_values: list[np.ndarray] = []
     task_text: Dict[int, str] = {}
+    subtask_text = _load_subtask_text(root) if args.prepend_subtask_to_lap else None
     episodes_processed = 0
     frames_processed = 0
     lap_written = 0
@@ -280,8 +326,16 @@ def _prepare_root(
         "task_index",
     ]
     have_joint = args.state_key in features
+    if args.action_representation == "absolute_joint" and not have_joint:
+        raise ValueError("absolute_joint action requires measured joint state")
     if have_joint:
         columns.append(args.state_key)
+    if args.action_representation == "absolute_joint":
+        columns.append(args.joint_action_key)
+    if args.prepend_subtask_to_lap:
+        if "subtask_index" not in features:
+            raise KeyError("--prepend-subtask-to-lap requires feature 'subtask_index'")
+        columns.append("subtask_index")
 
     for parquet_path in _parquet_paths(root):
         table = pq.read_table(parquet_path, columns=columns, memory_map=True)
@@ -297,13 +351,26 @@ def _prepare_root(
             task_indices = task_ids_all[mask][order]
             measured = _to_numpy_column(table, args.eef_state_key, np.float32)[mask][order]
             commanded = _to_numpy_column(table, args.absolute_action_key, np.float32)[mask][order]
+            subtask_indices = (
+                _to_numpy_column(table, "subtask_index", np.int64).reshape(-1)[mask][order]
+                if args.prepend_subtask_to_lap
+                else None
+            )
             relative = absolute_eef_to_relative_rpy(
                 torch.from_numpy(measured),
                 torch.from_numpy(commanded),
                 gripper_closed_value=args.gripper_closed_value,
                 gripper_open_value=args.gripper_open_value,
             ).numpy()
-            action_values.append(relative)
+            if args.action_representation == "absolute_joint":
+                joint_action = _to_numpy_column(table, args.joint_action_key, np.float32)[mask][order]
+                action_values.append(normalize_joint_grippers(
+                    torch.from_numpy(joint_action),
+                    gripper_closed_value=args.gripper_closed_value,
+                    gripper_open_value=args.gripper_open_value,
+                ).numpy())
+            else:
+                action_values.append(relative)
 
             if have_joint:
                 joint = _to_numpy_column(table, args.state_key, np.float32)[mask][order]
@@ -322,7 +389,13 @@ def _prepare_root(
             if args.write_language_action:
                 out_path = motus_root / "language_action" / f"episode_{int(episode_index):06d}.jsonl"
                 if args.overwrite or not out_path.exists():
-                    rows = _language_action_rows(relative, frame_indices, args.window_size)
+                    rows = _language_action_rows(
+                        relative,
+                        frame_indices,
+                        args.window_size,
+                        subtask_indices=subtask_indices,
+                        subtask_text=subtask_text,
+                    )
                     _write_jsonlines_atomic(out_path, rows)
                     lap_written += 1
 
@@ -356,9 +429,11 @@ def _prepare_root(
         "language_action_files_written": lap_written,
         "t5_embeddings_written": t5_written,
         "joint_state_available": have_joint,
+        "action_representation": args.action_representation,
         "task_count": len(task_text),
         "excluded_episode_indices": sorted(excluded),
         "task_text_filter": task_text_filter,
+        "prepend_subtask_to_lap": bool(args.prepend_subtask_to_lap),
         "source_episode_count": len(episode_meta),
         "source_files_modified": False,
     }
@@ -391,6 +466,10 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
     shared_stats_path = getattr(args, "shared_stats_path", None)
     if args.write_stats and len(roots) > 1 and not shared_stats_path:
         raise ValueError("Multiple --root values require --shared-stats-path when stats are enabled")
+    if args.write_stats and args.action_representation == "absolute_joint":
+        stats_target = Path(shared_stats_path) if shared_stats_path else roots[0] / args.motus_dir_name / "stats.json"
+        if stats_target.exists() and _read_json(stats_target).get("action_representation") != "absolute_joint":
+            raise ValueError(f"Refusing to overwrite non-joint normalization stats: {stats_target}")
     if args.encode_t5:
         device = args.t5_device or ("cuda" if torch.cuda.is_available() else "cpu")
         args._shared_t5_device = device
@@ -425,6 +504,7 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
             stats_path = prepared[0][3] / "stats.json"
         stats = {
             "version": "ola_motus_shared_v1",
+            "action_representation": args.action_representation,
             "dataset_roots": [str(root) for root in roots],
             "state": _stats(np.concatenate(state_arrays, axis=0)),
             "action": _stats(np.concatenate(action_arrays, axis=0)),
@@ -469,6 +549,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-key", default="observation.state")
     parser.add_argument("--eef-state-key", default="observation.ee_pose")
     parser.add_argument("--absolute-action-key", default="action.ee_pose")
+    parser.add_argument("--action-representation", choices=("delta_eef", "absolute_joint"), default="delta_eef")
+    parser.add_argument("--joint-action-key", default="action")
     parser.add_argument(
         "--camera-keys",
         nargs=3,
@@ -486,6 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--motus-dir-name", default="motus")
     parser.add_argument("--allow-missing-joint", action="store_true")
     parser.add_argument("--write-language-action", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--prepend-subtask-to-lap", action="store_true")
     parser.add_argument("--write-stats", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--encode-t5", action="store_true")
